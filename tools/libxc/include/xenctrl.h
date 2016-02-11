@@ -878,6 +878,11 @@ int xc_sched_rtds_domain_set(xc_interface *xch,
 int xc_sched_rtds_domain_get(xc_interface *xch,
                             uint32_t domid,
                             struct xen_domctl_sched_rtds *sdom);
+int xc_sched_rtds_mc_set(
+    xc_interface *xch,
+    uint32_t domid,
+    xen_domctl_mc_proto_t *mc_proto);
+
 
 int
 xc_sched_arinc653_schedule_set(
