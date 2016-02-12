@@ -82,7 +82,7 @@ xc_sched_rtds_mc_set(
     domctl.cmd = XEN_DOMCTL_scheduler_op;
     domctl.domain = (domid_t) domid;
     domctl.u.scheduler_op.sched_id = XEN_SCHEDULER_RTDS;
-    domctl.u.scheduler_op.cmd = XEN_DOMCTL_SCHEDOP_putinfo;
+    domctl.u.scheduler_op.cmd = XEN_DOMCTL_SCHEDOP_putMC;
     
    
     set_xen_guest_handle(domctl.u.scheduler_op.u.v.proto, mc_proto);
@@ -90,7 +90,7 @@ xc_sched_rtds_mc_set(
     rc = do_domctl(xch, &domctl);
     printf("after do_domctl");
     xc_hypercall_bounce_post(xch, mc_proto);
-
+    printf("after hypercall_bounce\n");
     return rc;
 }
 

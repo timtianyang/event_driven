@@ -1220,6 +1220,7 @@ rt_dom_cntl(
     struct vcpu *v;
     unsigned long flags;
     int rc = 0;
+    xen_domctl_mc_proto_t local;
 
     switch ( op->cmd )
     {
@@ -1253,6 +1254,18 @@ rt_dom_cntl(
             svc->budget = MICROSECS(op->u.rtds.budget);
         }
         spin_unlock_irqrestore(&prv->lock, flags);
+        break;
+
+    case XEN_DOMCTL_SCHEDOP_putMC:
+        
+        printk("sched_rt:\n");
+        if ( copy_from_guest(&local, op->u.v.proto, 1) )
+        {
+            rc = -EFAULT;
+            break;
+        }
+ 
+        printk("temp = %d\n", local.temp);
         break;
     }
 

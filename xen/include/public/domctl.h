@@ -352,6 +352,7 @@ DEFINE_XEN_GUEST_HANDLE(xen_domctl_mc_proto_t);
 /* Set or get info? */
 #define XEN_DOMCTL_SCHEDOP_putinfo 0
 #define XEN_DOMCTL_SCHEDOP_getinfo 1
+#define XEN_DOMCTL_SCHEDOP_putMC 3
 struct xen_domctl_scheduler_op {
     uint32_t sched_id;  /* XEN_SCHEDULER_* */
     uint32_t cmd;       /* XEN_DOMCTL_SCHEDOP_* */
@@ -370,6 +371,7 @@ struct xen_domctl_scheduler_op {
         struct {
             XEN_GUEST_HANDLE_64(xen_domctl_mc_proto_t) proto; 
         } v;
+
     } u;
 };
 typedef struct xen_domctl_scheduler_op xen_domctl_scheduler_op_t;
