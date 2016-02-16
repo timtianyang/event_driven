@@ -13,21 +13,32 @@ int main(void){
         fprintf(stderr, "Failed to open an xc handler");
         return 1;
     }
-    protocol.temp = 3;
+    protocol.domain_id = 0;
 
-    
-    xc_sched_rtds_mc_set(xci, domid, &protocol);
+    protocol.nr_old_vcpus = 2;
+    protocol.old_vcpus = malloc(sizeof(uint16_t)*protocol.nr_old_vcpus);
 
+    protocol.old_vcpus[0] = 3;
+    protocol.old_vcpus[1] =2;
 
-protocol.temp = 6;
+    protocol.nr_new_vcpus = 1;
+    protocol.new_vcpus = malloc(sizeof(uint16_t)*protocol.nr_new_vcpus);
 
-    
-    xc_sched_rtds_mc_set(xci, domid, &protocol);
+    protocol.new_vcpus[0] =0;
 
+    protocol.nr_unchanged_vcpus = 1;
+    protocol.unchanged_vcpus = malloc(sizeof(uint16_t)*protocol.nr_unchanged_vcpus);
 
-protocol.temp = 7;
+    protocol.unchanged_vcpus[0] =1;
 
-    
+    protocol.nr_changed_vcpus = 0;
+
+    protocol.ofst_old = 1000;
+    protocol.ofst_new = 2000;
+
+    protocol.peri = 1;
+    protocol.sync = 1;
+
     xc_sched_rtds_mc_set(xci, domid, &protocol);
 
     printf("after xc in main\n");

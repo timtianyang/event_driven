@@ -185,6 +185,15 @@ struct rt_vcpu {
     s_time_t cur_deadline;      /* current deadline for EDF */
 
     unsigned flags;             /* mark __RTDS_scheduled, etc.. */
+    /* mode change stuff */
+    unsigned active;            /* if active in mode change */
+    unsigned type;              /* old only, new only, unchanged, changed */
+    unsigned mode;              /* for changed vcpu only. 0:old mode, 1:new mode */
+    struct list_head type_elem; /* on the type list */
+#define OLD_VCPU 0
+#define NEW_VCPU 1
+#define UNCH_VCPU 2
+#define CH_VCPU 3
 };
 
 /*
@@ -194,6 +203,18 @@ struct rt_dom {
     struct list_head sdom_elem; /* link list on rt_priv */
     struct domain *dom;         /* pointer to upper domain */
 };
+
+/* mode change related control vars */
+struct mode_change{
+    xen_domctl_mc_proto_t cur;  /* mc protocol */
+    unsigned in_trans;          /* if rtds is in transition */
+    s_time_t recv;              /* when MCR was received */
+    struct list_head old_vcpus;
+    struct list_head new_vcpus;
+    struct list_head unchanged_vcpus;
+    struct list_head changed_vcpus;
+
+} rtds_mc;
 
 /*
  * Useful inline functions
@@ -254,6 +275,12 @@ static int
 __vcpu_on_replq(const struct rt_vcpu *svc)
 {
    return !list_empty(&svc->replq_elem);
+}
+
+static struct rt_vcpu*
+__type_elem(struct list_head *elem)
+{
+    return list_entry(elem, struct rt_vcpu, type_elem);
 }
 
 /*
@@ -561,6 +588,12 @@ rt_init(struct scheduler *ops)
     INIT_LIST_HEAD(&prv->depletedq);
     INIT_LIST_HEAD(&prv->replq);
 
+    /* mode change */
+    INIT_LIST_HEAD(&rtds_mc.old_vcpus);
+    INIT_LIST_HEAD(&rtds_mc.new_vcpus);
+    INIT_LIST_HEAD(&rtds_mc.unchanged_vcpus);
+    INIT_LIST_HEAD(&rtds_mc.changed_vcpus);
+
     cpumask_clear(&prv->tickled);
 
     ops->sched_data = prv;
@@ -719,6 +752,11 @@ rt_alloc_vdata(const struct scheduler *ops, struct vcpu *vc, void *dd)
 
     INIT_LIST_HEAD(&svc->q_elem);
     INIT_LIST_HEAD(&svc->replq_elem);
+
+    /* mode change */
+    INIT_LIST_HEAD(&svc->type_elem);
+    svc->active = 1; 
+
     svc->flags = 0U;
     svc->sdom = dd;
     svc->vcpu = vc;
@@ -948,6 +986,12 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
     }
     else
     {
+        if(rtds_mc.in_trans && !is_idle_vcpu(current))
+        {
+            printk("mode change kicks in...\n");
+            rtds_mc.in_trans = 0;
+        }
+
         snext = __runq_pick(ops, cpumask_of(cpu));
         if ( snext == NULL )
             snext = rt_vcpu(idle_vcpu[cpu]);
@@ -1220,7 +1264,8 @@ rt_dom_cntl(
     struct vcpu *v;
     unsigned long flags;
     int rc = 0;
-    xen_domctl_mc_proto_t local;
+    int tt;
+    struct list_head *iter;
 
     switch ( op->cmd )
     {
@@ -1258,14 +1303,88 @@ rt_dom_cntl(
 
     case XEN_DOMCTL_SCHEDOP_putMC:
         
-        printk("sched_rt:\n");
-        if ( copy_from_guest(&local, op->u.v.proto, 1) )
+        printk("rtds mode change info:\n");
+        if ( copy_from_guest(&rtds_mc.cur, op->u.v.proto, 1) )
         {
             rc = -EFAULT;
             break;
         }
+
+        printk("old vcpuids: ");
+        for(tt = 0; tt< rtds_mc.cur.nr_old_vcpus;tt++) 
+        {
+            svc = rt_vcpu(d->vcpu[rtds_mc.cur.old_vcpus[tt]]);
+            printk("%"PRIu64" ", rtds_mc.cur.old_vcpus[tt]);
+            list_add_tail(&svc->type_elem, &rtds_mc.old_vcpus ); 
+        }
+
+        printk("\nnew vcpuids: ");
+        for(tt = 0; tt< rtds_mc.cur.nr_new_vcpus;tt++) 
+        {
+            svc = rt_vcpu(d->vcpu[rtds_mc.cur.new_vcpus[tt]]);
+            printk("%"PRIu64" ", rtds_mc.cur.new_vcpus[tt]);
+            list_add_tail(&svc->type_elem, &rtds_mc.new_vcpus ); 
+        }
+
+    
+        printk("\nunchanged vcpuids: ");
+        for(tt = 0; tt< rtds_mc.cur.nr_unchanged_vcpus;tt++) 
+        {
+            svc = rt_vcpu(d->vcpu[rtds_mc.cur.unchanged_vcpus[tt]]);
+            printk("%"PRIu64" ", rtds_mc.cur.unchanged_vcpus[tt]); 
+            list_add_tail(&svc->type_elem, &rtds_mc.unchanged_vcpus ); 
+        }
+
+        printk("\nchanged vcpuids: ");
+        for(tt = 0; tt< rtds_mc.cur.nr_changed_vcpus;tt++) 
+        {
+            svc = rt_vcpu(d->vcpu[rtds_mc.cur.changed_vcpus[tt]]);
+            printk("%"PRIu64" ", rtds_mc.cur.changed_vcpus[tt]); 
+            list_add_tail(&svc->type_elem, &rtds_mc.changed_vcpus ); 
+        }
+
  
-        printk("temp = %d\n", local.temp);
+        printk("\noff_set_old: %"PRIu64"\n", rtds_mc.cur.ofst_old);
+        printk("off_set_new: %"PRIu64"\n", rtds_mc.cur.ofst_new);
+
+        printk("This protocol is ");
+        printk(rtds_mc.cur.sync == 1? "synchronous ":
+            "asynchronous ");
+
+        printk(rtds_mc.cur.peri == 1? "with periodicity\n":
+            "without periodicity\n");
+
+        rtds_mc.in_trans = 1;
+        rtds_mc.recv = NOW();
+
+        printk("old vcpu info:\n");
+        list_for_each( iter, &rtds_mc.old_vcpus )
+        {
+            svc = __type_elem(iter);
+            printk("vcpu%d ",svc->vcpu->vcpu_id);
+        }
+
+        printk("new vcpu info:\n");
+        list_for_each( iter, &rtds_mc.new_vcpus )
+        {
+            svc = __type_elem(iter);
+            printk("vcpu%d ",svc->vcpu->vcpu_id);
+        }
+
+        printk("unchanged vcpu info:\n");
+        list_for_each( iter, &rtds_mc.unchanged_vcpus )
+        {
+            svc = __type_elem(iter);
+            printk("vcpu%d ",svc->vcpu->vcpu_id);
+        }
+ 
+        printk("changed vcpu info:\n");
+        list_for_each( iter, &rtds_mc.changed_vcpus )
+        {
+            svc = __type_elem(iter);
+            printk("vcpu%d ",svc->vcpu->vcpu_id);
+        }
+ 
         break;
     }
 

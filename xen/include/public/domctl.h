@@ -345,7 +345,27 @@ DEFINE_XEN_GUEST_HANDLE(xen_domctl_max_vcpus_t);
 #define XEN_SCHEDULER_RTDS     8
 
 typedef struct xen_domctl_mc_proto {
-    uint16_t temp;
+    uint16_t domain_id;
+
+    /* mode members */
+    uint64_t *old_vcpus;
+    uint16_t nr_old_vcpus;
+
+    uint64_t *new_vcpus;
+    uint64_t nr_new_vcpus;
+
+    uint64_t *unchanged_vcpus;
+    uint64_t nr_unchanged_vcpus;
+
+    uint64_t *changed_vcpus;
+    uint64_t nr_changed_vcpus;
+    /* protocol specific */
+    uint64_t ofst_old;
+    uint64_t ofst_new;
+
+    uint64_t guard_old; /* disable all old vcpus */
+    uint64_t peri;
+    uint64_t sync;
 } xen_domctl_mc_proto_t;
 DEFINE_XEN_GUEST_HANDLE(xen_domctl_mc_proto_t);
 
