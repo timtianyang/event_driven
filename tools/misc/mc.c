@@ -17,21 +17,25 @@ int main(void){
 
     protocol.nr_old_vcpus = 2;
     protocol.old_vcpus = malloc(sizeof(uint16_t)*protocol.nr_old_vcpus);
-
     protocol.old_vcpus[0] = 3;
     protocol.old_vcpus[1] =2;
 
-    protocol.nr_new_vcpus = 1;
-    protocol.new_vcpus = malloc(sizeof(uint16_t)*protocol.nr_new_vcpus);
+    protocol.nr_new_vcpus = 0;
+   // protocol.new_vcpus = malloc(sizeof(uint16_t)*protocol.nr_new_vcpus);
+   // protocol.new_vcpus[0] =0;
 
-    protocol.new_vcpus[0] =0;
+    protocol.nr_changed_vcpus = 2;
+    protocol.changed_vcpus = malloc(sizeof(uint16_t)*protocol.nr_changed_vcpus);
+    protocol.changed_vcpus[0] =1;
+    protocol.changed_vcpus[1] =0;
+    protocol.new_params = malloc(sizeof(struct xen_domctl_sched_rtds)*protocol.nr_changed_vcpus);
+    protocol.new_params[0].period = 50000;
+    protocol.new_params[0].budget = 40000;
+    protocol.new_params[1].period = 70000;
+    protocol.new_params[1].budget = 60000;
 
-    protocol.nr_unchanged_vcpus = 1;
-    protocol.unchanged_vcpus = malloc(sizeof(uint16_t)*protocol.nr_unchanged_vcpus);
 
-    protocol.unchanged_vcpus[0] =1;
-
-    protocol.nr_changed_vcpus = 0;
+    protocol.nr_unchanged_vcpus = 0;
 
     protocol.ofst_old = 1000;
     protocol.ofst_new = 2000;

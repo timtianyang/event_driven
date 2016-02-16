@@ -1309,40 +1309,46 @@ rt_dom_cntl(
             rc = -EFAULT;
             break;
         }
+        spin_lock_irqsave(&prv->lock, flags);
 
-        printk("old vcpuids: ");
+       // printk("old vcpuids: ");
         for(tt = 0; tt< rtds_mc.cur.nr_old_vcpus;tt++) 
         {
             svc = rt_vcpu(d->vcpu[rtds_mc.cur.old_vcpus[tt]]);
-            printk("%"PRIu64" ", rtds_mc.cur.old_vcpus[tt]);
+           // printk("%"PRIu64" ", rtds_mc.cur.old_vcpus[tt]);
             list_add_tail(&svc->type_elem, &rtds_mc.old_vcpus ); 
         }
 
-        printk("\nnew vcpuids: ");
+       // printk("\nnew vcpuids: ");
         for(tt = 0; tt< rtds_mc.cur.nr_new_vcpus;tt++) 
         {
             svc = rt_vcpu(d->vcpu[rtds_mc.cur.new_vcpus[tt]]);
-            printk("%"PRIu64" ", rtds_mc.cur.new_vcpus[tt]);
+           // printk("%"PRIu64" ", rtds_mc.cur.new_vcpus[tt]);
             list_add_tail(&svc->type_elem, &rtds_mc.new_vcpus ); 
         }
 
     
-        printk("\nunchanged vcpuids: ");
+        //printk("\nunchanged vcpuids: ");
         for(tt = 0; tt< rtds_mc.cur.nr_unchanged_vcpus;tt++) 
         {
             svc = rt_vcpu(d->vcpu[rtds_mc.cur.unchanged_vcpus[tt]]);
-            printk("%"PRIu64" ", rtds_mc.cur.unchanged_vcpus[tt]); 
+           // printk("%"PRIu64" ", rtds_mc.cur.unchanged_vcpus[tt]); 
             list_add_tail(&svc->type_elem, &rtds_mc.unchanged_vcpus ); 
         }
 
-        printk("\nchanged vcpuids: ");
+        //printk("\nchanged vcpuids: ");
         for(tt = 0; tt< rtds_mc.cur.nr_changed_vcpus;tt++) 
         {
             svc = rt_vcpu(d->vcpu[rtds_mc.cur.changed_vcpus[tt]]);
-            printk("%"PRIu64" ", rtds_mc.cur.changed_vcpus[tt]); 
+            printk("-p%d-b%d",rtds_mc.cur.new_params[tt].period,rtds_mc.cur.new_params[tt].budget);
+           // printk("%"PRIu64" ", rtds_mc.cur.changed_vcpus[tt]); 
             list_add_tail(&svc->type_elem, &rtds_mc.changed_vcpus ); 
         }
 
+        rtds_mc.in_trans = 1;
+        rtds_mc.recv = NOW();
+
+        spin_unlock_irqrestore(&prv->lock, flags);
  
         printk("\noff_set_old: %"PRIu64"\n", rtds_mc.cur.ofst_old);
         printk("off_set_new: %"PRIu64"\n", rtds_mc.cur.ofst_new);
@@ -1354,9 +1360,7 @@ rt_dom_cntl(
         printk(rtds_mc.cur.peri == 1? "with periodicity\n":
             "without periodicity\n");
 
-        rtds_mc.in_trans = 1;
-        rtds_mc.recv = NOW();
-
+        
         printk("old vcpu info:\n");
         list_for_each( iter, &rtds_mc.old_vcpus )
         {
@@ -1364,21 +1368,21 @@ rt_dom_cntl(
             printk("vcpu%d ",svc->vcpu->vcpu_id);
         }
 
-        printk("new vcpu info:\n");
+        printk("\nnew vcpu info:\n");
         list_for_each( iter, &rtds_mc.new_vcpus )
         {
             svc = __type_elem(iter);
             printk("vcpu%d ",svc->vcpu->vcpu_id);
         }
 
-        printk("unchanged vcpu info:\n");
+        printk("\nunchanged vcpu info:\n");
         list_for_each( iter, &rtds_mc.unchanged_vcpus )
         {
             svc = __type_elem(iter);
             printk("vcpu%d ",svc->vcpu->vcpu_id);
         }
  
-        printk("changed vcpu info:\n");
+        printk("\nchanged vcpu info:\n");
         list_for_each( iter, &rtds_mc.changed_vcpus )
         {
             svc = __type_elem(iter);

@@ -359,6 +359,8 @@ typedef struct xen_domctl_mc_proto {
 
     uint64_t *changed_vcpus;
     uint64_t nr_changed_vcpus;
+    struct xen_domctl_sched_rtds* new_params;
+
     /* protocol specific */
     uint64_t ofst_old;
     uint64_t ofst_new;
