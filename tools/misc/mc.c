@@ -4,7 +4,7 @@
 #include <xc_private.h>
 int main(void){
     xen_domctl_mc_proto_t protocol;
-    uint32_t domid = 1;
+    uint32_t domid = 2;
 
     xc_interface *xci = xc_interface_open(NULL, NULL, 0);
 

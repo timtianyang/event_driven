@@ -315,7 +315,7 @@ rt_dump_vcpu(const struct scheduler *ops, const struct rt_vcpu *svc)
     cpulist_scnprintf(keyhandler_scratch, sizeof(keyhandler_scratch), mask);
     printk("[%5d.%-2u] cpu %u, (%"PRI_stime", %"PRI_stime"),"
            " cur_b=%"PRI_stime" cur_d=%"PRI_stime" last_start=%"PRI_stime"\n"
-           " \t\t onQ=%d runnable=%d active=%d flags=%x effective hard_affinity=%s\n",
+           " \t\t onQ=%d runnable=%d active=%d type=%d flags=%x effective hard_affinity=%s\n",
             svc->vcpu->domain->domain_id,
             svc->vcpu->vcpu_id,
             svc->vcpu->processor,
@@ -327,6 +327,7 @@ rt_dump_vcpu(const struct scheduler *ops, const struct rt_vcpu *svc)
             __vcpu_on_q(svc),
             vcpu_runnable(svc->vcpu),
             svc->active,
+            svc->type,
             svc->flags,
             keyhandler_scratch);
 }
@@ -625,9 +626,14 @@ __deactivate_vcpu(const struct scheduler *ops, struct rt_vcpu* svc)
 {
     if( svc->active == 1 )
     {    
-        svc->active = 0;
+        svc->active = 0; /* used in context_saved() */
         __type_remove(svc);
+
+        if ( __vcpu_on_q(svc) )
+            __q_remove(svc);
+
         printk("de-activate vcpu%di\n",svc->vcpu->vcpu_id);
+        
     }
 }
 
@@ -871,8 +877,7 @@ rt_alloc_vdata(const struct scheduler *ops, struct vcpu *vc, void *dd)
 
     /* mode change */
     INIT_LIST_HEAD(&svc->type_elem);
-    svc->active = 1; 
-
+    
     svc->flags = 0U;
     svc->sdom = dd;
     svc->vcpu = vc;
@@ -880,8 +885,10 @@ rt_alloc_vdata(const struct scheduler *ops, struct vcpu *vc, void *dd)
 
     svc->period = RTDS_DEFAULT_PERIOD;
     if ( !is_idle_vcpu(vc) )
+    {
         svc->budget = RTDS_DEFAULT_BUDGET;
-
+        svc->active = 1; 
+    }
     SCHED_STAT_CRANK(vcpu_alloc);
 
     return svc;
@@ -1088,7 +1095,8 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
     struct rt_vcpu *const scurr = rt_vcpu(current);
     struct rt_vcpu *snext = NULL;
     struct task_slice ret = { .migrated = 0 };
-    static int temp = 0;
+    static int count = 0;
+    struct list_head *iter,*temp;
 
     /* clear ticked bit now that we've been scheduled */
     cpumask_clear_cpu(cpu, &prv->tickled);
@@ -1098,10 +1106,10 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
 
     if(rtds_mc.in_trans)
     {    
-        printk("rt_sched:\nscurr = vcpu%d, bgt=%"PRI_stime" now=%"PRI_stime"\n", current->vcpu_id, scurr->budget, now);
-        temp++;
-        if(temp == 30)
-            rtds_mc_in_trans = 0;
+        printk("rt_sched:\nscurr = vcpu%d, %sactive type=%d %sidle bgt=%"PRI_stime" now=%"PRI_stime"\n", current->vcpu_id, scurr->active == 1? "":" not", scurr->type, is_idle_vcpu(scurr->vcpu)? "":"not ", scurr->budget, now);
+        count++;
+        if(count == 5)
+            rtds_mc.in_trans = 0;
     }
     if ( tasklet_work_scheduled )
     {
@@ -1112,46 +1120,68 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
     else
     {
         /* in transition */
-        if(rtds_mc.in_trans && !is_idle_vcpu(current))
+        if( rtds_mc.in_trans )
         {
             printk("in trans..\n");
+            rt_dump(ops); 
+
 /* off-set for disabling old/changed vcpus */
             if(now - rtds_mc.recv >= rtds_mc.cur.ofst_old)
             {
-                if( scurr->type == OLD_VCPU && scurr->budget == 0 )
+                printk("disabling old..\n");
+                list_for_each_safe( iter, temp, &rtds_mc.old_vcpus )
                 {
-                    printk("scurr is old vcpu\n");
-                    __deactivate_vcpu(ops, scurr);
+                    struct rt_vcpu* svc = __type_elem(iter);
+                    if( svc->budget == 0 )
+                        __deactivate_vcpu(ops, svc); 
                 }
-                else if (scurr->type == CH_VCPU && scurr->mode == 0)
-                {
-                    printk("scurr is changed vcpu\n");
-                    __deactivate_vcpu(ops, scurr);
-                    /* 
-                     * release the updated vcpu after context switch
-                     * need to update the task here
-                     */
-                    if(rtds_mc.cur.sync == 0)
-                    {
-                        _update_changed_vcpu(scurr); 
-                        scurr->mode = 1;
 
-                        if ( now >= scurr->cur_deadline )
-                            rt_update_deadline(now, scurr);
+                printk("disabling changed..\n");
+                list_for_each( iter, &rtds_mc.changed_vcpus )
+                {
+                    struct rt_vcpu* svc = __type_elem(iter);
+                    if( svc->budget == 0 )
+                    {
+                        if(rtds_mc.cur.sync == 0)
+                        {
+                            /* release the updated vcpu */
+                            _update_changed_vcpu(svc); 
+                            scurr->mode = 1;
+
+                            if ( now >= svc->cur_deadline )
+                            {
+                                rt_update_deadline(now, svc);
+                                if( __vcpu_on_q(svc) )
+                                {
+                                    __q_remove(svc);
+                                    __runq_insert(ops, svc);
+                                }
+                            }
+                        }
+
                     }
                 }
+             
             }
+/* guard to disable all at once for idle time proto */
             else if ( 0 &&_runq_empty(ops) && scurr->budget == 0)
             {
                 printk("guard for idle time satisfied\n");
                 rtds_mc.cur.ofst_old = 0;
             }
+            else
+                printk("not ready to disable old.%"PRI_stime" %"PRI_stime"\n"
+                    ,now - rtds_mc.recv, rtds_mc.cur.ofst_old);
+
+
+
 /* periodicity for unchanged tasks */
             if( scurr->type == UNCH_VCPU && scurr->budget == 0 && rtds_mc.cur.peri == 0 )
             {
                 printk("\n");
                 __deactivate_vcpu(ops, scurr);
             }
+
 /* synchronous */
             if( rtds_mc.cur.sync == 1 )
             {
@@ -1179,13 +1209,14 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
         if ( snext == NULL )
         {
             snext = rt_vcpu(idle_vcpu[cpu]);
-            printk("nothing available\n");
+            if(rtds_mc.in_trans)
+                printk("nothing available\n");
         }
         /* if scurr has higher priority and budget, still pick scurr */
         if ( !is_idle_vcpu(current) &&
             vcpu_runnable(current) &&
             scurr->cur_budget > 0 &&
-            rtds_mc.in_trans != 1 && /* only not in transient */
+            scurr->active == 1 && /* still run scurr if active */
             ( is_idle_vcpu(snext->vcpu) ||
             scurr->cur_deadline <= snext->cur_deadline ) )
             snext = scurr;
@@ -1523,7 +1554,7 @@ rt_dom_cntl(
         {
             svc = rt_vcpu(d->vcpu[rtds_mc.cur.new_vcpus[tt]]);
             svc->type = NEW_VCPU;
-            svc->active = 1;
+            svc->active = 0;
 
            // printk("%"PRIu64" ", rtds_mc.cur.new_vcpus[tt]);
             list_add_tail(&svc->type_elem, &rtds_mc.new_vcpus ); 
@@ -1557,6 +1588,9 @@ rt_dom_cntl(
 
         rtds_mc.in_trans = 1;
         rtds_mc.recv = NOW();
+
+        /* invoke scheduler now */
+        cpu_raise_softirq(current->processor, SCHEDULE_SOFTIRQ);
 
         spin_unlock_irqrestore(&prv->lock, flags);
  
@@ -1631,7 +1665,8 @@ static void repl_handler(void *data){
         if ( now >= svc->cur_deadline )
         {
             rt_update_deadline(now, svc);
-
+            if(rtds_mc.in_trans)
+                printk("repl vcpu%d\n",svc->vcpu->vcpu_id);
             /*
              * when the replenishment happens
              * svc is either on a pcpu or on
