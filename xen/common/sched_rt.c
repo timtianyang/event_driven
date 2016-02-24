@@ -617,10 +617,16 @@ __activate_vcpu(const struct scheduler *ops, struct rt_vcpu* svc)
     {
         svc->active = 1;
         __runq_insert(ops, svc);
+        __replq_insert(ops, svc);
         printk("activate vcpu%d\n",svc->vcpu->vcpu_id); 
     }
 }
 
+/*
+ * deactivate a single vcpu and take it off the queues
+ * if it is delay_add mark it !active so it won't be added
+ * back to queue in context_saved()
+ */
 static void
 __deactivate_vcpu(const struct scheduler *ops, struct rt_vcpu* svc)
 {
@@ -632,15 +638,25 @@ __deactivate_vcpu(const struct scheduler *ops, struct rt_vcpu* svc)
         if ( __vcpu_on_q(svc) )
             __q_remove(svc);
 
+        if( __vcpu_on_replq(svc) )
+            __replq_remove(ops,svc);
+
         printk("de-activate vcpu%di\n",svc->vcpu->vcpu_id);
         
     }
 }
 
+/*
+ * activate all new vcpus that are !active
+ * some of the new vcpus might be disabled 
+ * long time ago so update deadline accordingly
+ */
 static void
 _activate_all_new_vcpus(const struct scheduler *ops)
 {
     struct list_head* iter;
+    s_time_t now = NOW();
+
     printk("activating all new vpus\n");
     list_for_each(iter, &rtds_mc.new_vcpus)
     {
@@ -649,16 +665,24 @@ _activate_all_new_vcpus(const struct scheduler *ops)
         if(svc->active == 0)
         {
             struct rt_vcpu *svc = __type_elem(iter);
-            svc->active = 1;
+            if ( now >= svc->cur_deadline )
+                rt_update_deadline(now, svc);
+
             __activate_vcpu(ops, svc);
         }
     }
 }
 
+/*
+ * activate all changed vcpus that are deactivated
+ * update param before activation
+ */
 static void
 _activate_all_changed_vcpus(const struct scheduler *ops)
 {
     struct list_head* iter;
+    s_time_t now = NOW();
+
     printk("activating all changed vpus\n");
     list_for_each(iter, &rtds_mc.changed_vcpus)
     {
@@ -667,11 +691,14 @@ _activate_all_changed_vcpus(const struct scheduler *ops)
         if(svc->active == 0 && svc->mode == 0)
         {
             struct rt_vcpu *svc = __type_elem(iter);
-            svc->active = 1;
+ 
+            _update_changed_vcpu(svc); 
+
+            if ( now >= svc->cur_deadline )
+                rt_update_deadline(now, svc);
+
             svc->mode = 1;
 
-            _update_changed_vcpu(svc); 
-    
             __activate_vcpu(ops, svc);
         }
     }
@@ -1123,8 +1150,6 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
         if( rtds_mc.in_trans )
         {
             printk("in trans..\n");
-            rt_dump(ops); 
-
 /* off-set for disabling old/changed vcpus */
             if(now - rtds_mc.recv >= rtds_mc.cur.ofst_old)
             {
@@ -1132,7 +1157,9 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
                 list_for_each_safe( iter, temp, &rtds_mc.old_vcpus )
                 {
                     struct rt_vcpu* svc = __type_elem(iter);
-                    if( svc->budget == 0 )
+                    rt_dump_vcpu(ops, svc);
+            
+                    if( svc->budget == 0 || !__vcpu_on_q(svc) )
                         __deactivate_vcpu(ops, svc); 
                 }
 
@@ -1140,7 +1167,9 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
                 list_for_each( iter, &rtds_mc.changed_vcpus )
                 {
                     struct rt_vcpu* svc = __type_elem(iter);
-                    if( svc->budget == 0 )
+                    rt_dump_vcpu(ops, svc);
+
+                    if( svc->budget == 0 || !__vcpu_on_q(svc) )
                     {
                         if(rtds_mc.cur.sync == 0)
                         {
@@ -1156,6 +1185,8 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
                                     __q_remove(svc);
                                     __runq_insert(ops, svc);
                                 }
+                                __replq_remove(ops, svc);
+                                __replq_insert(ops, svc);
                             }
                         }
 
@@ -1424,6 +1455,12 @@ rt_vcpu_wake(const struct scheduler *ops, struct vcpu *vc)
     else
         SCHED_STAT_CRANK(vcpu_wake_not_runnable);
 
+    if( !svc->active )
+    {
+        printk("vcpu%d wake up inactive\n", vc->vcpu_id);
+        return;
+    }
+
     /* budget repl here is needed before inserting back to runq. If so,
      * it should be re-inserted back to the replenishment queue.
      */
@@ -1538,55 +1575,59 @@ rt_dom_cntl(
         }
         spin_lock_irqsave(&prv->lock, flags);
 
-       // printk("old vcpuids: ");
+        printk("%"PRIu64" old vcpuids: ", rtds_mc.cur.nr_old_vcpus);
         for(tt = 0; tt< rtds_mc.cur.nr_old_vcpus;tt++) 
         {
             svc = rt_vcpu(d->vcpu[rtds_mc.cur.old_vcpus[tt]]);
             svc->type = OLD_VCPU;
             svc->active = 1;
 
-            // printk("%"PRIu64" ", rtds_mc.cur.old_vcpus[tt]);
+            printk("%"PRIu64" ", rtds_mc.cur.old_vcpus[tt]);
             list_add_tail(&svc->type_elem, &rtds_mc.old_vcpus ); 
         }
 
-       // printk("\nnew vcpuids: ");
+       printk("\n%"PRIu64" new vcpuids: ", rtds_mc.cur.nr_new_vcpus);
         for(tt = 0; tt< rtds_mc.cur.nr_new_vcpus;tt++) 
         {
             svc = rt_vcpu(d->vcpu[rtds_mc.cur.new_vcpus[tt]]);
             svc->type = NEW_VCPU;
-            svc->active = 0;
+            //svc->active = 0;
+            
+            svc->new_param = rtds_mc.cur.new_params + tt;
+            printk("%"PRIu64" ", rtds_mc.cur.new_vcpus[tt]);
+            printk("-p%d-b%d ",svc->new_param->period,svc->new_param->budget);
 
-           // printk("%"PRIu64" ", rtds_mc.cur.new_vcpus[tt]);
             list_add_tail(&svc->type_elem, &rtds_mc.new_vcpus ); 
         }
 
     
-        //printk("\nunchanged vcpuids: ");
+        printk("\n%"PRIu64" unchanged vcpuids: ", rtds_mc.cur.nr_unchanged_vcpus);
         for(tt = 0; tt< rtds_mc.cur.nr_unchanged_vcpus;tt++) 
         {
             svc = rt_vcpu(d->vcpu[rtds_mc.cur.unchanged_vcpus[tt]]);
             svc->type = UNCH_VCPU;
             svc->active = 1;
 
-            // printk("%"PRIu64" ", rtds_mc.cur.unchanged_vcpus[tt]); 
+             printk("%"PRIu64" ", rtds_mc.cur.unchanged_vcpus[tt]); 
             list_add_tail(&svc->type_elem, &rtds_mc.unchanged_vcpus ); 
         }
 
-        //printk("\nchanged vcpuids: ");
+        printk("\n%"PRIu64" changed vcpuids: ", rtds_mc.cur.nr_changed_vcpus);
         for(tt = 0; tt< rtds_mc.cur.nr_changed_vcpus;tt++) 
         {
             svc = rt_vcpu(d->vcpu[rtds_mc.cur.changed_vcpus[tt]]);
             svc->type = CH_VCPU;
             svc->active = 1;
-            svc->new_param = rtds_mc.cur.new_params + tt;
+            svc->new_param = rtds_mc.cur.changed_params + tt;
 
             svc->mode = 0;
+            printk("%"PRIu64" ", rtds_mc.cur.changed_vcpus[tt]); 
+
             printk("-p%d-b%d",svc->new_param->period,svc->new_param->budget);
-           // printk("%"PRIu64" ", rtds_mc.cur.changed_vcpus[tt]); 
             list_add_tail(&svc->type_elem, &rtds_mc.changed_vcpus ); 
         }
 
-        rtds_mc.in_trans = 1;
+        //rtds_mc.in_trans = 1;
         rtds_mc.recv = NOW();
 
         /* invoke scheduler now */
