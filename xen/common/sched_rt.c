@@ -1712,8 +1712,7 @@ rt_dom_cntl(
         /* invoke scheduler now */
         cpu_raise_softirq(current->processor, SCHEDULE_SOFTIRQ);
 
-        spin_unlock_irqrestore(&prv->lock, flags);
- 
+         
         printk("\noff_set_old: %"PRIu64"\n", rtds_mc.cur.ofst_old);
         printk("off_set_new: %"PRIu64"\n", rtds_mc.cur.ofst_new);
 
@@ -1753,7 +1752,9 @@ rt_dom_cntl(
             printk("vcpu%d ",svc->vcpu->vcpu_id);
         }
 
-        printk("\n"); 
+        printk("\n");
+        spin_unlock_irqrestore(&prv->lock, flags);
+
         break;
     }
 

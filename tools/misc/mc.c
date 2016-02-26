@@ -150,12 +150,18 @@ int main(int argc, char* argv[]){
                                 break;
                             case 1: 
                                 printf(" i_param=%d  b=%d ",i_param, atoi(p));
-                                current_param[i_param].period = 1000;//atoi(p);
+                                current_param[i_param].period = atoi(p);
                                 break;
                             case 2: 
                                 printf(" i_param=%d  p=%d ",i_param, atoi(p));
-                                current_param[i_param++].budget = 2000;//atoi(p);
+                                current_param[i_param++].budget = atoi(p);
                                 /* i_param has been incremented */
+                                if( current_param[i_param].budget > 
+                                    current_param[i_param].period )
+                                {
+                                    printf("Error: budget is bigger than period...\n");
+                                    goto out;
+                                }
                                 break;
                         }
                     }
@@ -173,11 +179,6 @@ int main(int argc, char* argv[]){
 
     fclose(fp);
 
-   // protocol.new_params = malloc(sizeof(struct xen_domctl_sched_rtds)*protocol.nr_changed_vcpus);
-   // protocol.new_params[0].period = 50000;
-   // protocol.new_params[0].budget = 40000;
-   // protocol.new_params[1].period = 70000;
-   // protocol.new_params[1].budget = 60000;
     protocol.ofst_old = 0;
     protocol.ofst_new = 0;
 
