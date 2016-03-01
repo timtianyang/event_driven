@@ -344,27 +344,28 @@ DEFINE_XEN_GUEST_HANDLE(xen_domctl_max_vcpus_t);
 #define XEN_SCHEDULER_ARINC653 7
 #define XEN_SCHEDULER_RTDS     8
 
-typedef struct xen_domctl_mc_proto {
-    uint16_t domain_id;
+typedef struct xen_domctl_sched_rtds {
+    uint32_t period;
+    uint32_t budget;
+} xen_domctl_sched_rtds_t;
 
-    /* mode members */
-    uint64_t *old_vcpus;
-    uint64_t nr_old_vcpus;
+typedef struct xen_domctl_schedparam_vcpu {
+    xen_domctl_sched_rtds_t rtds;
+    uint16_t vcpuid;
+    uint16_t type;
+    #define OLD 0
+    #define NEW 1
+    #define CHANGED 2
+    #define UNCHANGED 3
+} xen_domctl_schedparam_t;
+DEFINE_XEN_GUEST_HANDLE(xen_domctl_schedparam_t);
 
-    uint64_t *new_vcpus;
-    uint64_t nr_new_vcpus;
-
-    uint64_t *unchanged_vcpus;
-    uint64_t nr_unchanged_vcpus;
-
-    uint64_t *changed_vcpus;
-    uint64_t nr_changed_vcpus;
-    /* parameters for changed vcpus and new vcpus */
-    struct xen_domctl_sched_rtds* changed_params;
-    struct xen_domctl_sched_rtds* new_params;
-
-
-
+typedef struct mode_change_info {
+    uint32_t domid;
+    uint32_t nr_new;
+    uint32_t nr_old;
+    uint32_t nr_changed;
+    uint32_t nr_unchanged;
     /* protocol specific */
     uint64_t ofst_old;
     uint64_t ofst_new;
@@ -372,8 +373,7 @@ typedef struct xen_domctl_mc_proto {
     uint64_t guard_old; /* disable all old vcpus */
     uint64_t peri;
     uint64_t sync;
-} xen_domctl_mc_proto_t;
-DEFINE_XEN_GUEST_HANDLE(xen_domctl_mc_proto_t);
+} mode_change_info_t;
 
 /* Set or get info? */
 #define XEN_DOMCTL_SCHEDOP_putinfo 0
@@ -390,14 +390,11 @@ struct xen_domctl_scheduler_op {
         struct xen_domctl_sched_credit2 {
             uint16_t weight;
         } credit2;
-        struct xen_domctl_sched_rtds {
-            uint32_t period;
-            uint32_t budget;
-        } rtds;
+        xen_domctl_sched_rtds_t rtds;
         struct {
-            XEN_GUEST_HANDLE_64(xen_domctl_mc_proto_t) proto; 
-        } v;
-
+            mode_change_info_t info;
+            XEN_GUEST_HANDLE_64(xen_domctl_schedparam_t) params;
+        } mode_change;
     } u;
 };
 typedef struct xen_domctl_scheduler_op xen_domctl_scheduler_op_t;

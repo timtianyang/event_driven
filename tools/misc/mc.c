@@ -2,195 +2,119 @@
 #include <xenctrl.h>
 #include <stdlib.h>
 #include <xc_private.h>
+#include "ezxml.h"
 int main(int argc, char* argv[]){
-    xen_domctl_mc_proto_t protocol = {
-        .nr_old_vcpus = 0,
-        .nr_new_vcpus = 0,
-        .nr_changed_vcpus = 0,
-        .nr_unchanged_vcpus = 0,
+    mode_change_info_t info = {
+        .nr_old = 0,
+        .nr_new = 0,
+        .nr_changed = 0,
+        .nr_unchanged = 0,
     };
-    uint64_t *current_list;
-    struct xen_domctl_sched_rtds* current_param;
-    uint32_t domid;
-    char* filename;
-    FILE* fp;
-    char* line;
-    size_t len = 0;
-    int flag = 0;
 
-    xc_interface *xci = xc_interface_open(NULL, NULL, 0);
+    xen_domctl_schedparam_t *params;
+
+    xc_interface *xci; 
+
+    ezxml_t xml, new_v, old_v, changed_v, unchanged_v;
+    int i = 0, nr_vcpus;
+    int sync, domid, old_offset, new_offset, peri;
+
+    if (argc != 2) return fprintf(stderr, "usage: %s xmlfile\n", argv[0]);
+
+    xml = ezxml_parse_file(argv[1]);
+
+    domid = atoi(ezxml_attr(xml,"domain"));
+    sync = atoi(ezxml_attr(xml,"sync"));
+    old_offset = atoi(ezxml_attr(xml,"old_offset"));
+    new_offset = atoi(ezxml_attr(xml,"new_offset"));
+    peri = atoi(ezxml_attr(xml,"peri"));
+
+    printf("domain=%d sync=%d old_ofst=%d\n",domid, sync, old_offset);
+
+    info.domid = domid;
+    info.ofst_old = old_offset;
+    info.ofst_new = new_offset;
+    info.sync = sync;
+    info.peri = peri;
+    info.guard_old = 0;
+
+    printf("new vcpus:\n");
+    for(new_v = ezxml_child(xml, "new_v"); new_v; new_v = new_v->next)
+    {
+        info.nr_new++; 
+    }
+    for(old_v = ezxml_child(xml, "old_v"); old_v; old_v = old_v->next)
+    {
+        info.nr_old++;
+    }
+    for(changed_v = ezxml_child(xml, "changed_v"); changed_v; changed_v = changed_v->next)
+    {
+        info.nr_changed++;
+    }
+    for(unchanged_v = ezxml_child(xml, "unchanged_v"); unchanged_v; unchanged_v = unchanged_v->next)
+    {
+        info.nr_unchanged++;
+    }
+
+    nr_vcpus = info.nr_new + info.nr_old + info.nr_changed + info.nr_unchanged;
+    params = malloc(sizeof(xen_domctl_schedparam_t) * nr_vcpus);
+
+    for(i = 0, new_v = ezxml_child(xml, "new_v"); new_v; new_v = new_v->next, i++)
+    {
+        printf("vcpu id = %s\n", ezxml_child(new_v, "id")->txt);
+        printf("p = %s\n", ezxml_child(new_v, "period")->txt);
+        printf("b = %s\n", ezxml_child(new_v, "budget")->txt);
+        params[i].type = NEW;
+        params[i].vcpuid = atoi(ezxml_child(new_v, "id")->txt);
+        params[i].rtds.period = atoi(ezxml_child(new_v, "period")->txt);
+        params[i].rtds.budget = atoi(ezxml_child(new_v, "budget")->txt); 
+    }
+
+    printf("\nold_vcpus:\n");
+    for(old_v = ezxml_child(xml, "old_v"); old_v; old_v = old_v->next, i++)
+    {
+        printf("vcpu id = %s\n", ezxml_child(old_v, "id")->txt);
+        params[i].type = OLD;
+        params[i].vcpuid = atoi(ezxml_child(old_v, "id")->txt);
+    }
+
+    printf("\nchanged_vcpus:\n");
+    for(changed_v = ezxml_child(xml, "changed_v"); changed_v; changed_v = changed_v->next, i++)
+    {
+        printf("vcpu id = %s\n", ezxml_child(changed_v, "id")->txt);
+        printf("p = %s\n", ezxml_child(changed_v, "period")->txt);
+        printf("b = %s\n", ezxml_child(changed_v, "budget")->txt);
+        params[i].type = CHANGED;
+        params[i].vcpuid = atoi(ezxml_child(changed_v, "id")->txt);
+        params[i].rtds.period = atoi(ezxml_child(changed_v, "period")->txt);
+        params[i].rtds.budget = atoi(ezxml_child(changed_v, "budget")->txt);
+    }
+
+    printf("\nunchanged_vcpus:\n");
+    for(unchanged_v = ezxml_child(xml, "unchanged_v"); unchanged_v; unchanged_v = unchanged_v->next, i++)
+    {
+        printf("vcpu id = %s\n", ezxml_child(unchanged_v, "id")->txt);
+        params[i].type = UNCHANGED;
+        params[i].vcpuid = atoi(ezxml_child(unchanged_v, "id")->txt);
+    }
+
+    i = fprintf(stderr, "%s", ezxml_error(xml));
+    ezxml_free(xml);
+
+
+    xci = xc_interface_open(NULL, NULL, 0);
 
     if ( !xci )
     {
         fprintf(stderr, "Failed to open an xc handler");
+        goto out;
         return 1;
     }
 
-
-    if( argc != 2)
-    {
-        printf("need mode change file\n");
-    }
-    else
-    {
-        filename = argv[1];
-        fp = fopen(filename,"r");
-        if( fp == NULL )
-        {
-            printf("fail to open file %s\n",filename);
-            return 1;
-        }
-
-        while( getline(&line, &len, fp) != -1 )
-        {
-            char *p;
-            /* gets rid off the linefeed */
-            line[strlen(line)-1] = '\0';
-
-            if( strcmp(line,"domain") == 0 )
-            {
-                flag = 0; /* domain info */
-                printf("domain info:\n");
-                continue;
-            }
-            else if( strcmp(line,"old") == 0 )
-            {
-                flag = 1; /* domain info */
-                printf("old vcpus:\n");
-                continue;
-            }
-            else if( strcmp(line,"new") == 0 )
-            {
-                flag = 3; /* domain info */
-                printf("new vcpus:\n");
-                continue;
-            }
-            else if( strcmp(line,"unchanged") == 0 )
-            {
-                flag = 2; /* domain info */
-                printf("unchanged vcpus:\n");
-                continue;
-            }
-            else if( strcmp(line,"changed") == 0 )
-            {
-                flag = 4; /* domain info */
-                printf("changed vcpus:\n");
-                continue;
-            }
-
-            if(flag == 0)
-            {
-                domid = atoi(line);
-                printf("domain id = %d\n",domid);
-                protocol.domain_id = domid;
-            }
-            else
-            {
-                int count = 0;
-                int i = 0;
-                int i_param = 0;
-                char* copy_line = malloc(strlen(line)+1);
-                memcpy(copy_line,line,strlen(line)+1);
-
-                /* parse the line just to get a count */
-                for(p = strtok(copy_line," "); p != NULL; p = strtok(NULL, " "))
-                {
-                    count++;
-                }
-                free(copy_line);
-                printf("there are %d tokens\n",count);
-                if( count%3 != 0 && flag >=3 )
-                {
-                    printf("failed: number of budget and period do not match!\n");
-                    fclose(fp);
-                    goto out;
-                }
-                switch(flag)
-                {
-                    case 1:
-                    protocol.nr_old_vcpus = count;
-                    protocol.old_vcpus = malloc(sizeof(uint16_t)*protocol.nr_old_vcpus);
-                    current_list = protocol.old_vcpus;
-
-                    break;
-                    case 2:
-                    protocol.nr_unchanged_vcpus = count;
-                    protocol.unchanged_vcpus = malloc(sizeof(uint16_t)*protocol.nr_unchanged_vcpus);
-                    current_list = protocol.unchanged_vcpus;
-
-                    break;
-                    case 3:
-                    protocol.nr_new_vcpus = count/3;
-                    protocol.new_vcpus = malloc(sizeof(uint16_t)*protocol.nr_new_vcpus);
-                    protocol.new_params = malloc(sizeof(struct xen_domctl_sched_rtds)*protocol.nr_new_vcpus);
-                    current_list = protocol.new_vcpus;
-                    current_param = protocol.new_params;
-                    break;
-                    case 4:
-                    protocol.nr_changed_vcpus = count/3;
-                    protocol.changed_vcpus = malloc(sizeof(uint16_t)*protocol.nr_changed_vcpus);
-                    protocol.changed_params = malloc(sizeof(struct xen_domctl_sched_rtds)*protocol.nr_changed_vcpus);
-                    current_list = protocol.changed_vcpus;
-                    current_param = protocol.changed_params;
-                    break;
-                }
-
-                printf("allocating is done\n");
-
-                /* parsing one line */
-                for(p = strtok(line," "); p != NULL; p = strtok(NULL, " "))
-                {
-                    if( flag >= 3)
-                    {
-                        switch(i%3)
-                        {
-                            case 0: 
-                                printf(" i_param=%d  vcpu%d ", i_param, atoi(p));
-                                current_list[i_param] = atoi(p);
-                                break;
-                            case 1: 
-                                printf(" i_param=%d  b=%d ",i_param, atoi(p));
-                                current_param[i_param].period = atoi(p);
-                                break;
-                            case 2: 
-                                printf(" i_param=%d  p=%d ",i_param, atoi(p));
-                                current_param[i_param++].budget = atoi(p);
-                                /* i_param has been incremented */
-                                if( current_param[i_param].budget > 
-                                    current_param[i_param].period )
-                                {
-                                    printf("Error: budget is bigger than period...\n");
-                                    goto out;
-                                }
-                                break;
-                        }
-                    }
-                    else
-                    {
-                        printf("%d ", atoi(p));
-                        current_list[i] = atoi(p);
-                    }
-                    i++;
-                }
-                printf("\n");
-            }
-        }
-    printf("successfully formed a mode change request...\n");
-
-    fclose(fp);
-
-    protocol.ofst_old = 0;
-    protocol.ofst_new = 0;
-
-    protocol.peri = 1;
-    protocol.sync = 1;
-
-    xc_sched_rtds_mc_set(xci, domid, &protocol);
+    xc_sched_rtds_mc_set(xci, domid, info, params);
 
     printf("after xc in main\n");
     
-    
-    }
 out:
     xc_interface_close(xci);
     printf("closed xc interface....\n");
