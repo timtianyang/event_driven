@@ -1221,8 +1221,12 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
                 {
                     struct rt_vcpu* svc = __type_elem(iter);
                     rt_dump_vcpu(ops, svc);
-            
-                    if( svc->cur_budget == 0 )
+
+                    /*
+                     * only disable it if it has no budget
+                     * if it is alseep
+                     */
+                    if( svc->cur_budget == 0 || ( !vcpu_runnable(svc->vcpu) ) )
                     {   /* taken off runq/replq inside */
                         __deactivate_vcpu(ops, svc);
                         /* taken off type q if its old */
@@ -1231,13 +1235,18 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
                 }
 
                 printk("disabling changed..\n");
-                list_for_each( iter, &rtds_mc.changed_vcpus )
+                list_for_each_safe( iter, temp, &rtds_mc.changed_vcpus )
                 {
                     struct rt_vcpu* svc = __type_elem(iter);
                     rt_dump_vcpu(ops, svc);
 
+                    /*
+                     * only disable it if it has no budget
+                     * if it is alseep
+                     * and if it's current active
+                     */
                     if( svc->active == 1 && 
-                        ( svc->cur_budget == 0 ) )
+                        ( svc->cur_budget == 0 || ( !vcpu_runnable(svc->vcpu) ) ) )
                     {
                         if(rtds_mc.info.sync == 0)
                         {
