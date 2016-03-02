@@ -1169,7 +1169,8 @@ mode_change_over(const struct scheduler *ops)
         }
 
     }
-    rtds_mc.in_trans = 0; 
+    rtds_mc.in_trans = 0;
+    printk("mc took %"PRI_stime"\n", NOW() - rtds_mc.recv); 
 }
 
 /*
@@ -1221,7 +1222,7 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
                     struct rt_vcpu* svc = __type_elem(iter);
                     rt_dump_vcpu(ops, svc);
             
-                    if( svc->budget == 0 || !__vcpu_on_q(svc) )
+                    if( svc->cur_budget == 0 )
                     {   /* taken off runq/replq inside */
                         __deactivate_vcpu(ops, svc);
                         /* taken off type q if its old */
@@ -1235,8 +1236,8 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
                     struct rt_vcpu* svc = __type_elem(iter);
                     rt_dump_vcpu(ops, svc);
 
-                    if( ( svc->budget == 0 || !__vcpu_on_q(svc) ) 
-                        && svc->active == 1 )
+                    if( svc->active == 1 && 
+                        ( svc->cur_budget == 0 ) )
                     {
                         if(rtds_mc.info.sync == 0)
                         {
@@ -1261,9 +1262,9 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
                         {
                             /* temperarily disable this vcpu */
                             __deactivate_vcpu(ops, svc);
-                            /* Add the flag ahead so re-activating won't add
-                             * to runq again. Because it's de-activated,
-                             * it definitely would be switched off a cpu
+                            /* 
+                             * Add the flag ahead so re-activating won't add
+                             * to runq again in activate().
                              */
                             if ( svc == scurr && !is_idle_vcpu(current) &&
                                     vcpu_runnable(current) )
@@ -1271,13 +1272,12 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
 
                             /* don't remove from type list for later activation */
                         }
-
                     }
                 }
              
             }
             /* guard to disable all at once for idle time proto */
-            else if ( 0 &&_runq_empty(ops) && scurr->budget == 0)
+            else if ( 0 &&_runq_empty(ops) && scurr->cur_budget == 0)
             {
                 printk("guard for idle time satisfied\n");
                 
@@ -1289,11 +1289,19 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
 
 
 /* periodicity for unchanged tasks */
-            if( scurr->type == UNCHANGED && scurr->budget == 0 && rtds_mc.info.peri == 0 )
+            if( rtds_mc.info.peri == 0 )
             {
-                printk("\n");
-                /* only taken off run/replq not type queue */
-                __deactivate_vcpu(ops, scurr);
+                printk("disabling unchanged..\n");
+                list_for_each_safe( iter, temp, &rtds_mc.unchanged_vcpus )
+                {
+                    struct rt_vcpu* svc = __type_elem(iter);
+                    rt_dump_vcpu(ops, svc);
+
+                    if( svc->cur_budget == 0 || ( !__vcpu_on_q(svc) ) )
+                    {   /* taken off runq/replq inside */
+                        __deactivate_vcpu(ops, svc);
+                    }
+                }
             }
 
 /* synchronous */
@@ -1317,11 +1325,14 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
             else
             {
                 _activate_all_new_vcpus(ops);
+
+                if( rtds_mc.info.peri == 0 )
+                    _activate_all_unchanged_vcpus(ops);
+
                 mode_change_over(ops);
                 count = 0;
                 printk("async mc finished...\n");
             }
-
         }
 /* mode change over */
 
@@ -1696,19 +1707,19 @@ rt_dom_cntl(
                 case NEW:
                     svc->type = NEW;
                     svc->active = 0;
-                    printk("vcpu%d is new\n", svc->vcpu->vcpu_id);
+                    printk("vcpu%d is new ", svc->vcpu->vcpu_id);
                 
                     svc->period = svc->new_param.period;
                     svc->budget = svc->new_param.budget;
-                    printk(" -p%d -b%d ",svc->new_param.period,svc->new_param.budget);
+                    printk(" -p%d -b%d\n",svc->new_param.period,svc->new_param.budget);
 
                     list_add_tail(&svc->type_elem, &rtds_mc.new_vcpus);
                     break;
                 case CHANGED:
                     svc->type = CHANGED;
                     svc->mode = 0;
-                    printk("vcpu%d is changed\n", svc->vcpu->vcpu_id);
-                    printk(" -p%d -b%d ",svc->new_param.period,svc->new_param.budget);
+                    printk("vcpu%d is changed", svc->vcpu->vcpu_id);
+                    printk(" -p%d -b%d\n",svc->new_param.period,svc->new_param.budget);
 
                     list_add_tail(&svc->type_elem, &rtds_mc.changed_vcpus);
                     break;
@@ -1720,15 +1731,9 @@ rt_dom_cntl(
 
             }
         }
-        
-        
-        rtds_mc.in_trans = 1;
-        rtds_mc.recv = NOW();
 
-        /* invoke scheduler now */
-        cpu_raise_softirq(current->processor, SCHEDULE_SOFTIRQ);
+        rtds_mc.info = *mc;
 
-         
         printk("\noff_set_old: %"PRIu64"\n", rtds_mc.info.ofst_old);
         printk("off_set_new: %"PRIu64"\n", rtds_mc.info.ofst_new);
 
@@ -1769,6 +1774,14 @@ rt_dom_cntl(
         }
 
         printk("\n");
+
+        rtds_mc.in_trans = 1;
+        rtds_mc.recv = NOW();
+
+        /* invoke scheduler now */
+        cpu_raise_softirq(current->processor, SCHEDULE_SOFTIRQ);
+
+
     out:
         spin_unlock_irqrestore(&prv->lock, flags);
 
