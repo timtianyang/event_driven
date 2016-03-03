@@ -1279,11 +1279,12 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
                                 rt_update_deadline(now, svc);
                                 if( __vcpu_on_q(svc) )
                                 {
+                                    /* on runq implies on replq */
                                     __q_remove(svc);
                                     __runq_insert(ops, svc);
+                                    __replq_remove(ops, svc);
+                                    __replq_insert(ops, svc);
                                 }
-                                __replq_remove(ops, svc);
-                                __replq_insert(ops, svc);
                             }
                         }
                         else
@@ -1335,6 +1336,10 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
 /* synchronous */
             if( rtds_mc.info.sync == 1 )
             {
+                /*
+                 * done after all old are disabled
+                 * and all changed are inactive
+                 */
                 if( _old_vcpus_inactive() && _changed_vcpus_inactive() )
                 {
                     _activate_all_new_vcpus(ops);
@@ -1357,7 +1362,11 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
                 if( rtds_mc.info.peri == 0 )
                     _activate_all_unchanged_vcpus(ops);
 
-                if(_changed_vcpus_released())
+                /*
+                 * done after all old are disabled
+                 * and all changed are released
+                 */
+                if( _old_vcpus_inactive() && _changed_vcpus_released())
                 { 
                     mode_change_over(ops);
                     count = 0;
@@ -1822,7 +1831,7 @@ rt_dom_cntl(
 
         rtds_mc.in_trans = 1;
         rtds_mc.recv = NOW();
-
+        printk("MC rev: %"PRI_stime"\n", rtds_mc.recv);
     out:
         spin_unlock_irqrestore(&prv->lock, flags);
         /* invoke scheduler now */
