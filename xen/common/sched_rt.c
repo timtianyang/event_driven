@@ -607,6 +607,20 @@ _changed_vcpus_inactive(void)
     return 1;
 }
 
+/*
+ * Checks if all changed vcpus are released
+ * by checking if the type queue is empty.
+ * If a protocol is synchronous, a changed
+ * vcpu will be taken off from type queue.
+ * This function should only be used with sync == 1
+ */
+static int
+_changed_vcpus_released(void)
+{
+    return list_empty(&rtds_mc.changed_vcpus)
+}
+
+
 /* need to update deadline before activating */
 static void
 __activate_vcpu(const struct scheduler *ops, struct rt_vcpu* svc)
@@ -1338,6 +1352,8 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
                 if( rtds_mc.info.peri == 0 )
                     _activate_all_unchanged_vcpus(ops);
 
+                if(changed_vcpus_released())
+                
                 mode_change_over(ops);
                 count = 0;
                 printk("async mc finished...\n");
