@@ -614,7 +614,7 @@ _changed_vcpus_inactive(void)
 static int
 _changed_vcpus_released(void)
 {
-    return list_empty(&rtds_mc.changed_vcpus)
+    return list_empty(&rtds_mc.changed_vcpus);
 }
 
 
@@ -625,9 +625,12 @@ __activate_vcpu(const struct scheduler *ops, struct rt_vcpu* svc)
     if( svc->active == 0 )
     {
         svc->active = 1;
-        if( !(svc->flags & RTDS_delayed_runq_add) )
-            __runq_insert(ops, svc);
+
         __replq_insert(ops, svc);
+
+        if( (!(svc->flags & RTDS_delayed_runq_add) &&
+               (!__vcpu_on_q(svc)) ))
+            __runq_insert(ops, svc);
         printk("activate vcpu%d\n",svc->vcpu->vcpu_id); 
     }
 }
@@ -647,7 +650,7 @@ __deactivate_vcpu(const struct scheduler *ops, struct rt_vcpu* svc)
         if ( __vcpu_on_q(svc) )
             __q_remove(svc);
 
-        if( __vcpu_on_replq(svc) )
+        if( vcpu_on_replq(svc) )
             __replq_remove(ops,svc);
 
         printk("de-activate vcpu%d\n",svc->vcpu->vcpu_id);
@@ -1354,11 +1357,12 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
                 if( rtds_mc.info.peri == 0 )
                     _activate_all_unchanged_vcpus(ops);
 
-                if(changed_vcpus_released())
-                
-                mode_change_over(ops);
-                count = 0;
-                printk("async mc finished...\n");
+                if(_changed_vcpus_released())
+                { 
+                    mode_change_over(ops);
+                    count = 0;
+                    printk("async mc finished...\n");
+                }
             }
         }
 /* mode change over */
@@ -1417,7 +1421,7 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
     if(rtds_mc.in_trans)
     {
         printk("rt.time = %"PRI_stime"\n",snext->budget);
-        printk("picked vcpu%d",snext->vcpu->vcpu_id);
+        printk("picked vcpu%d\n",snext->vcpu->vcpu_id);
     }
     /* TRACE */
     {
@@ -1453,14 +1457,21 @@ rt_vcpu_sleep(const struct scheduler *ops, struct vcpu *vc)
     SCHED_STAT_CRANK(vcpu_sleep);
 
     if ( curr_on_cpu(vc->processor) == vc )
+    {
         cpu_raise_softirq(vc->processor, SCHEDULE_SOFTIRQ);
+       // printk("vcpu%d sleeps on core\n",vc->vcpu_id);
+    }
     else if ( __vcpu_on_q(svc) )
     {
+        //printk("vcpu%d sleeps on q\n",vc->vcpu_id);
         __q_remove(svc);
         __replq_remove(ops, svc);
     }
     else if ( svc->flags & RTDS_delayed_runq_add )
+    {    
         clear_bit(__RTDS_delayed_runq_add, &svc->flags);
+        //printk("vcpu%d sleeps before context saved\n",vc->vcpu_id);
+    }
 }
 
 /*
@@ -1590,6 +1601,8 @@ rt_vcpu_wake(const struct scheduler *ops, struct vcpu *vc)
         return;
     }
 
+    //printk("vcpu%d wakes up\n",vc->vcpu_id);
+
     /*
      * If a deadline passed while svc was asleep/blocked, we need new
      * scheduling parameters ( a new deadline and full budget), and
@@ -1639,9 +1652,13 @@ rt_context_saved(const struct scheduler *ops, struct vcpu *vc)
     {
         __runq_insert(ops, svc);
         runq_tickle(ops, svc);
+        //printk("vcpu%d context, runq add\n",vc->vcpu_id);
     }
     else
+    {
         __replq_remove(ops, svc);
+        //printk("vcpu%d context, replq off\n",vc->vcpu_id);
+    }
 out:
     vcpu_schedule_unlock_irq(lock, vc);
 }
@@ -1806,10 +1823,11 @@ rt_dom_cntl(
         rtds_mc.in_trans = 1;
         rtds_mc.recv = NOW();
 
-        /* invoke scheduler now */
-        cpu_raise_softirq(current->processor, SCHEDULE_SOFTIRQ);
     out:
         spin_unlock_irqrestore(&prv->lock, flags);
+        /* invoke scheduler now */
+        cpu_raise_softirq(current->processor, SCHEDULE_SOFTIRQ);
+
         break;
     }
     return rc;
