@@ -146,9 +146,6 @@ static unsigned int nr_rt_ops;
 /* handler for the replenishment timer */
 static void repl_handler(void *data);
 
-/* checks if a timer is active or not */
-bool_t active_timer(struct timer* t);
-
 /*
  * Systme-wide private data, include global RunQueue/DepletedQ
  * Global lock is referenced by schedule_data.schedule_lock from all
@@ -246,9 +243,15 @@ static inline struct list_head *rt_replq(const struct scheduler *ops)
     return &rt_priv(ops)->replq;
 }
 
+static struct rt_vcpu*
+__type_elem(struct list_head *elem)
+{
+    return list_entry(elem, struct rt_vcpu, type_elem);
+}
+
 /*
- * Queue helper functions for runq, depletedq
- * and replenishment event queue
+ * Helper functions for manipulating the runqueue, the depleted queue,
+ * and the replenishment events queue.
  */
 static int
 __vcpu_on_q(const struct rt_vcpu *svc)
@@ -263,21 +266,15 @@ __q_elem(struct list_head *elem)
 }
 
 static struct rt_vcpu *
-__replq_elem(struct list_head *elem)
+replq_elem(struct list_head *elem)
 {
     return list_entry(elem, struct rt_vcpu, replq_elem);
 }
 
 static int
-__vcpu_on_replq(const struct rt_vcpu *svc)
+vcpu_on_replq(const struct rt_vcpu *svc)
 {
    return !list_empty(&svc->replq_elem);
-}
-
-static struct rt_vcpu*
-__type_elem(struct list_head *elem)
-{
-    return list_entry(elem, struct rt_vcpu, type_elem);
 }
 
 /*
@@ -374,7 +371,7 @@ rt_dump(const struct scheduler *ops)
     printk("Global Replenishment Event info:\n");
     list_for_each( iter, replq )
     {
-        svc = __replq_elem(iter);
+        svc = replq_elem(iter);
         rt_dump_vcpu(ops, svc);
     }
 
@@ -442,6 +439,20 @@ rt_update_deadline(s_time_t now, struct rt_vcpu *svc)
     return;
 }
 
+/* 
+ * A helper function that only removes a vcpu from a queue 
+ * and it returns 1 if the vcpu was in front of the list.
+ */
+static inline int
+deadline_queue_remove(struct list_head *queue, struct list_head *elem)
+{
+    int pos = 0;
+    if( queue->next != elem )
+        pos = 1;
+    list_del_init(elem);
+    return !pos;
+}
+
 static inline void
 __q_remove(struct rt_vcpu *svc)
 {
@@ -456,11 +467,10 @@ __type_remove(struct rt_vcpu *svc)
     list_del_init(&svc->type_elem);
 }
 
-
 /*
  * Removing a vcpu from the replenishment queue could
  * re-program the timer for the next replenishment event
- * if the timer is currently active
+ * if it was at the front of the list.
  */
 static inline void
 __replq_remove(const struct scheduler *ops, struct rt_vcpu *svc)
@@ -469,52 +479,42 @@ __replq_remove(const struct scheduler *ops, struct rt_vcpu *svc)
     struct list_head *replq = rt_replq(ops);
     struct timer* repl_timer = prv->repl_timer;
 
-    if ( __vcpu_on_replq(svc) )
+    if( deadline_queue_remove(replq,&svc->replq_elem) )
     {
-        /*
-         * disarm the timer if removing the first replenishment event
-         * which is going to happen next
-         */
-        if( active_timer(repl_timer) )
+        stop_timer(repl_timer);
+        /* re-arm the timer for the next replenishment event */
+        if( !list_empty(replq) )
         {
-            struct rt_vcpu *next_repl = __replq_elem(replq->next);
-
-            if( next_repl->cur_deadline == svc->cur_deadline )
-                repl_timer->expires = 0;
-
-            list_del_init(&svc->replq_elem);
-
-            /* re-arm the timer for the next replenishment event */
-            if( !list_empty(replq) )
-            {
-                struct rt_vcpu *svc_next = __replq_elem(replq->next);
-                set_timer(repl_timer, svc_next->cur_deadline);
-            }
+            struct rt_vcpu *svc_next = replq_elem(replq->next);
+            set_timer(repl_timer, svc_next->cur_deadline);
         }
-
-        else
-            list_del_init(&svc->replq_elem);
     }
 }
 
 /*
  * An utility function that inserts a vcpu to a
- * queue based on certain order (EDF)
+ * queue based on certain order (EDF). The returned
+ * value is 1 if a vcpu has been inserted to the
+ * front of a list
  */
-static void
-_deadline_queue_insert(struct rt_vcpu * (*_get_q_elem)(struct list_head *elem),
+static int
+deadline_queue_insert(struct rt_vcpu * (*_get_q_elem)(struct list_head *elem),
     struct rt_vcpu *svc, struct list_head *elem, struct list_head *queue)
 {
     struct list_head *iter;
+    int pos = 0;
 
     list_for_each(iter, queue)
     {
         struct rt_vcpu * iter_svc = (*_get_q_elem)(iter);
         if ( svc->cur_deadline <= iter_svc->cur_deadline )
-                break;
+            break;
+
+        pos++;
     }
 
     list_add_tail(elem, iter);
+    return !pos;
 }
 
 /*
@@ -532,20 +532,20 @@ __runq_insert(const struct scheduler *ops, struct rt_vcpu *svc)
 
     ASSERT( !__vcpu_on_q(svc) );
 
+    ASSERT( vcpu_on_replq(svc) );
     /* add svc to runq if svc still has budget */
     if ( svc->cur_budget > 0 )
-        _deadline_queue_insert(&__q_elem, svc, &svc->q_elem, runq);
+        deadline_queue_insert(&__q_elem, svc, &svc->q_elem, runq);
     else
         list_add(&svc->q_elem, &prv->depletedq);
 }
 
 /*
- * Insert svc into the repl even list:
- * vcpus that needs to be repl earlier go first.
- * scheduler private lock serializes this operation
- * it could re-program the timer if it fires later than
- * this vcpu's cur_deadline. Also, this is used to program
- * the timer for the first time.
+ * Insert svc into the replenishment event list
+ * in replenishment time order.
+ * vcpus that need to be replished earlier go first.
+ * The timer may be re-programmed if svc is inserted
+ * at the front of the event list.
  */
 static void
 __replq_insert(const struct scheduler *ops, struct rt_vcpu *svc)
@@ -554,12 +554,9 @@ __replq_insert(const struct scheduler *ops, struct rt_vcpu *svc)
     struct rt_private *prv = rt_priv(ops);
     struct timer *repl_timer = prv->repl_timer;
 
-    ASSERT( !__vcpu_on_replq(svc) );
+    ASSERT( !vcpu_on_replq(svc) );
 
-    _deadline_queue_insert(&__replq_elem, svc, &svc->replq_elem, replq);
-
-    if( repl_timer->expires == 0 ||
-        ( active_timer(repl_timer) && repl_timer->expires > svc->cur_deadline ) )
+    if( deadline_queue_insert(&replq_elem, svc, &svc->replq_elem, replq) )
         set_timer(repl_timer,svc->cur_deadline);
 }
 
@@ -750,7 +747,6 @@ _activate_all_changed_vcpus(const struct scheduler *ops)
     }
 
 }
-
 
 /*
  * Init/Free related code
@@ -950,7 +946,7 @@ rt_alloc_vdata(const struct scheduler *ops, struct vcpu *vc, void *dd)
 
     /* mode change */
     INIT_LIST_HEAD(&svc->type_elem);
-    
+
     svc->flags = 0U;
     svc->sdom = dd;
     svc->vcpu = vc;
@@ -962,6 +958,7 @@ rt_alloc_vdata(const struct scheduler *ops, struct vcpu *vc, void *dd)
         svc->budget = RTDS_DEFAULT_BUDGET;
         svc->active = 1; 
     }
+
     SCHED_STAT_CRANK(vcpu_alloc);
 
     return svc;
@@ -995,8 +992,13 @@ rt_vcpu_insert(const struct scheduler *ops, struct vcpu *vc)
     if ( now >= svc->cur_deadline )
         rt_update_deadline(now, svc);
 
-    if ( !__vcpu_on_q(svc) && vcpu_runnable(vc) && !vc->is_running )
-        __runq_insert(ops, svc);
+    if ( !__vcpu_on_q(svc) && vcpu_runnable(vc) )
+    {
+        __replq_insert(ops, svc);
+ 
+        if( !vc->is_running)
+            __runq_insert(ops, svc);
+    }
     vcpu_schedule_unlock_irq(lock, vc);
 
     SCHED_STAT_CRANK(vcpu_insert);
@@ -1020,7 +1022,7 @@ rt_vcpu_remove(const struct scheduler *ops, struct vcpu *vc)
     if ( __vcpu_on_q(svc) )
         __q_remove(svc);
 
-    if( __vcpu_on_replq(svc) )
+    if( vcpu_on_replq(svc) )
         __replq_remove(ops,svc);
 
     vcpu_schedule_unlock_irq(lock, vc);
@@ -1407,9 +1409,7 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
             snext->vcpu->processor = cpu;
             ret.migrated = 1;
         }
-
         ret.time = snext->budget; /* invoke the scheduler next time */
-
     }
 
     ret.task = snext->vcpu;
@@ -1448,19 +1448,19 @@ static void
 rt_vcpu_sleep(const struct scheduler *ops, struct vcpu *vc)
 {
     struct rt_vcpu * const svc = rt_vcpu(vc);
- 
+
     BUG_ON( is_idle_vcpu(vc) );
     SCHED_STAT_CRANK(vcpu_sleep);
 
     if ( curr_on_cpu(vc->processor) == vc )
         cpu_raise_softirq(vc->processor, SCHEDULE_SOFTIRQ);
     else if ( __vcpu_on_q(svc) )
+    {
         __q_remove(svc);
+        __replq_remove(ops, svc);
+    }
     else if ( svc->flags & RTDS_delayed_runq_add )
         clear_bit(__RTDS_delayed_runq_add, &svc->flags);
-
-    if( __vcpu_on_replq(svc) )
-        __replq_remove(ops, svc);
 }
 
 /*
@@ -1590,8 +1590,10 @@ rt_vcpu_wake(const struct scheduler *ops, struct vcpu *vc)
         return;
     }
 
-    /* budget repl here is needed before inserting back to runq. If so,
-     * it should be re-inserted back to the replenishment queue.
+    /*
+     * If a deadline passed while svc was asleep/blocked, we need new
+     * scheduling parameters ( a new deadline and full budget), and
+     * also a new replenishment event
      */
     if ( now >= svc->cur_deadline)
     {   
@@ -1599,9 +1601,8 @@ rt_vcpu_wake(const struct scheduler *ops, struct vcpu *vc)
         __replq_remove(ops, svc);
     }
 
-    if( !__vcpu_on_replq(svc) )
+    if( !vcpu_on_replq(svc) )
         __replq_insert(ops, svc);
-    
     /* If context hasn't been saved for this vcpu yet, we can't put it on
      * the Runqueue/DepletedQ. Instead, we set a flag so that it will be
      * put on the Runqueue/DepletedQ after the context has been saved.
@@ -1639,6 +1640,8 @@ rt_context_saved(const struct scheduler *ops, struct vcpu *vc)
         __runq_insert(ops, svc);
         runq_tickle(ops, svc);
     }
+    else
+        __replq_remove(ops, svc);
 out:
     vcpu_schedule_unlock_irq(lock, vc);
 }
@@ -1805,14 +1808,10 @@ rt_dom_cntl(
 
         /* invoke scheduler now */
         cpu_raise_softirq(current->processor, SCHEDULE_SOFTIRQ);
-
-
     out:
         spin_unlock_irqrestore(&prv->lock, flags);
-
         break;
     }
-
     return rc;
 }
 
@@ -1836,40 +1835,39 @@ static void repl_handler(void *data){
 
     list_for_each_safe(iter, tmp, replq)
     {
-        svc = __replq_elem(iter);
+        svc = replq_elem(iter);
 
-        if ( now >= svc->cur_deadline )
+        if ( now < svc->cur_deadline )
+            break;
+
+        rt_update_deadline(now, svc);
+
+        /*
+         * when the replenishment happens
+         * svc is either on a pcpu or on
+         * runq/depletedq
+         */
+        if( __vcpu_on_q(svc) )
         {
-            rt_update_deadline(now, svc);
-            if(rtds_mc.in_trans)
-                printk("repl vcpu%d\n",svc->vcpu->vcpu_id);
-            /*
-             * when the replenishment happens
-             * svc is either on a pcpu or on
-             * runq/depletedq
-             */
-            if( __vcpu_on_q(svc) )
-            {
-                /* put back to runq */
-                __q_remove(svc);
-                __runq_insert(ops, svc);
-            }
-
-            /* 
-             * tickle regardless where it's at 
-             * because a running vcpu could have
-             * a later deadline than others after
-             * replenishment
-             */
-            runq_tickle(ops, svc);
-
-            /* update replenishment event queue */
-            __replq_remove(ops, svc);
-            __replq_insert(ops, svc);
+            /* put back to runq */
+            __q_remove(svc);
+            __runq_insert(ops, svc);
         }
 
-        else
-            break;
+        /* 
+         * tickle regardless where it's at 
+         * because a running vcpu could have
+         * a later deadline than others after
+         * replenishment
+         */
+        runq_tickle(ops, svc);
+
+        /* 
+         * update replenishment event queue
+         * without reprogramming the timer
+         */
+        deadline_queue_remove(replq, &svc->replq_elem);
+        deadline_queue_insert(&replq_elem, svc, &svc->replq_elem, replq);
     }
 
     /* 
@@ -1877,18 +1875,9 @@ static void repl_handler(void *data){
      * or else don't program the timer
      */
     if( !list_empty(replq) )
-        set_timer(repl_timer, __replq_elem(replq->next)->cur_deadline);
+        set_timer(repl_timer, replq_elem(replq->next)->cur_deadline);
 
     spin_unlock_irqrestore(&prv->lock, flags);
-
-}
-
-/* checks if a timer has been stopped or not */
-bool_t active_timer(struct timer *timer)
-{
-    ASSERT(timer->status >= TIMER_STATUS_inactive);
-    ASSERT(timer->status <= TIMER_STATUS_in_list);
-    return (timer->status >= TIMER_STATUS_in_heap);
 }
 
 static struct rt_private _rt_priv;
