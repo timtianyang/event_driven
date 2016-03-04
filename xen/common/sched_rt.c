@@ -417,25 +417,6 @@ rt_update_deadline(s_time_t now, struct rt_vcpu *svc)
     }
 
     svc->cur_budget = svc->budget;
-
-    /* TRACE */
-    {
-        struct {
-            unsigned dom:16,vcpu:16;
-            unsigned cur_deadline_lo, cur_deadline_hi;
-            unsigned cur_budget_lo, cur_budget_hi;
-        } d;
-        d.dom = svc->vcpu->domain->domain_id;
-        d.vcpu = svc->vcpu->vcpu_id;
-        d.cur_deadline_lo = (unsigned) svc->cur_deadline;
-        d.cur_deadline_hi = (unsigned) (svc->cur_deadline >> 32);
-        d.cur_budget_lo = (unsigned) svc->cur_budget;
-        d.cur_budget_hi = (unsigned) (svc->cur_budget >> 32);
-        trace_var(TRC_RTDS_BUDGET_REPLENISH, 1,
-                  sizeof(d),
-                  (unsigned char *) &d);
-    }
-
     return;
 }
 
@@ -1561,7 +1542,7 @@ out:
         } d;
         d.cpu = cpu_to_tickle;
         d.pad = 0;
-        trace_var(TRC_RTDS_TICKLE, 0,
+        trace_var(TRC_RTDS_TICKLE, 1,
                   sizeof(d),
                   (unsigned char *)&d);
     }
