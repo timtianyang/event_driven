@@ -462,13 +462,14 @@ __replq_remove(const struct scheduler *ops, struct rt_vcpu *svc)
 
     if( deadline_queue_remove(replq,&svc->replq_elem) )
     {
-        stop_timer(repl_timer);
         /* re-arm the timer for the next replenishment event */
         if( !list_empty(replq) )
         {
             struct rt_vcpu *svc_next = replq_elem(replq->next);
             set_timer(repl_timer, svc_next->cur_deadline);
         }
+        else
+            stop_timer(repl_timer);
     }
 }
 
