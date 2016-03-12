@@ -200,6 +200,7 @@ struct rt_vcpu {
     unsigned active;            /* if active in mode change */
     unsigned type;              /* old only, new only, unchanged, changed */
     unsigned mode;              /* for changed vcpu only. 0:old mode, 1:new mode */
+    unsigned action;            /* */
     struct xen_domctl_sched_rtds new_param;
     struct list_head type_elem; /* on the type list */
 };
@@ -503,60 +504,11 @@ __replq_remove(const struct scheduler *ops, struct rt_vcpu *svc)
     }
 }
 
-/*
- * An utility function that inserts a vcpu to a
- * queue based on certain order (EDF). The returned
- * value is 1 if a vcpu has been inserted to the
- * front of a list.
- */
-static int
-deadline_queue_insert(struct rt_vcpu * (*_get_q_elem)(struct list_head *elem),
-    struct rt_vcpu *svc, struct list_head *elem, struct list_head *queue)
-{
-    struct list_head *iter;
-    int pos = 0;
-
-    list_for_each( iter, queue )
-    {
-        struct rt_vcpu * iter_svc = (*_get_q_elem)(iter);
-        if ( svc->cur_deadline <= iter_svc->cur_deadline )
-            break;
-        pos++;
-    }
-    list_add_tail(elem, iter);
-    return !pos;
-}
-
 static inline void
 __type_remove(struct rt_vcpu *svc)
 {
     printk("remove vcpu%d from type\n", svc->vcpu->vcpu_id);
     list_del_init(&svc->type_elem);
-}
-
-/*
- * Removing a vcpu from the replenishment queue could
- * re-program the timer for the next replenishment event
- * if it was at the front of the list.
- */
-static inline void
-__replq_remove(const struct scheduler *ops, struct rt_vcpu *svc)
-{
-    struct rt_private *prv = rt_priv(ops);
-    struct list_head *replq = rt_replq(ops);
-    struct timer* repl_timer = prv->repl_timer;
-
-    if( deadline_queue_remove(replq,&svc->replq_elem) )
-    {
-        /* re-arm the timer for the next replenishment event */
-        if( !list_empty(replq) )
-        {
-            struct rt_vcpu *svc_next = replq_elem(replq->next);
-            set_timer(repl_timer, svc_next->cur_deadline);
-        }
-        else
-            stop_timer(repl_timer);
-    }
 }
 
 /*
@@ -1382,7 +1334,7 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
                                     /* on runq implies on replq */
                                     __q_remove(svc);
                                     __runq_insert(ops, svc);
-                                    __replq_remove(ops, svc);
+                                    //__replq_remove(ops, svc);
                                     __replq_insert(ops, svc);
                                 }
                             }
