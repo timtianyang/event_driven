@@ -166,20 +166,20 @@ static void repl_handler(void *data);
  * physical cpus. It can be grabbed via vcpu_schedule_lock_irq()
  */
 struct rt_private {
-    spinlock_t lock;             /* the global coarse grand lock */
-    struct list_head sdom;       /* list of availalbe domains, used for dump */
-    struct list_head runq;       /* ordered list of runnable vcpus */
-    struct list_head depletedq;  /* unordered list of depleted vcpus */
-    struct list_head replq;      /* ordered list of vcpus that need replenishment */
-    cpumask_t tickled;           /* cpus been tickled */
-    struct timer *repl_timer;    /* replenishment timer */
+    spinlock_t lock;            /* the global coarse grand lock */
+    struct list_head sdom;      /* list of availalbe domains, used for dump */
+    struct list_head runq;      /* ordered list of runnable vcpus */
+    struct list_head depletedq; /* unordered list of depleted vcpus */
+    struct list_head replq;     /* ordered list of vcpus that need replenishment */
+    cpumask_t tickled;          /* cpus been tickled */
+    struct timer *repl_timer;   /* replenishment timer */
 };
 
 /*
  * Virtual CPU
  */
 struct rt_vcpu {
-    struct list_head q_elem;     /* on the runq/depletedq list */
+    struct list_head q_elem;    /* on the runq/depletedq list */
     struct list_head replq_elem; /* on the repl event list */
 
     /* Up-pointers */
@@ -191,9 +191,9 @@ struct rt_vcpu {
     s_time_t budget;
 
     /* VCPU current infomation in nanosecond */
-    s_time_t cur_budget;         /* current budget */
-    s_time_t last_start;         /* last start time */
-    s_time_t cur_deadline;       /* current deadline for EDF */
+    s_time_t cur_budget;        /* current budget */
+    s_time_t last_start;        /* last start time */
+    s_time_t cur_deadline;      /* current deadline for EDF */
 
     unsigned flags;             /* mark __RTDS_scheduled, etc.. */
     /* mode change stuff */
@@ -209,8 +209,8 @@ struct rt_vcpu {
  * Domain
  */
 struct rt_dom {
-    struct list_head sdom_elem;  /* link list on rt_priv */
-    struct domain *dom;          /* pointer to upper domain */
+    struct list_head sdom_elem; /* link list on rt_priv */
+    struct domain *dom;         /* pointer to upper domain */
 };
 
 /* mode change related control vars */
@@ -524,7 +524,7 @@ deadline_queue_insert(struct rt_vcpu * (*_get_q_elem)(struct list_head *elem),
     struct list_head *iter;
     int pos = 0;
 
-    list_for_each(iter, queue)
+    list_for_each ( iter, queue )
     {
         struct rt_vcpu * iter_svc = (*_get_q_elem)(iter);
         if ( svc->cur_deadline <= iter_svc->cur_deadline )
@@ -1903,7 +1903,7 @@ static void repl_handler(void *data){
      */
     INIT_LIST_HEAD(&tmp_replq);
 
-    list_for_each_safe(iter, tmp, replq)
+    list_for_each_safe ( iter, tmp, replq )
     {
         svc = replq_elem(iter);
 
@@ -1932,7 +1932,7 @@ static void repl_handler(void *data){
     }
 
     /* Iterate through the list of updated vcpus. */
-    list_for_each_safe(iter, tmp, &tmp_replq)
+    list_for_each_safe ( iter, tmp, &tmp_replq )
     {
         struct vcpu* vc;
         svc = replq_elem(iter);
