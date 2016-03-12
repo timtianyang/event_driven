@@ -166,21 +166,21 @@ static void repl_handler(void *data);
  * physical cpus. It can be grabbed via vcpu_schedule_lock_irq()
  */
 struct rt_private {
-    spinlock_t lock;            /* the global coarse grand lock */
-    struct list_head sdom;      /* list of availalbe domains, used for dump */
-    struct list_head runq;      /* ordered list of runnable vcpus */
-    struct list_head depletedq; /* unordered list of depleted vcpus */
-    struct list_head replq;     /* ordered list of vcpus that need replenishment */
-    cpumask_t tickled;          /* cpus been tickled */
-    struct timer *repl_timer;   /* replenishment timer */
+    spinlock_t lock;             /* the global coarse grand lock */
+    struct list_head sdom;       /* list of availalbe domains, used for dump */
+    struct list_head runq;       /* ordered list of runnable vcpus */
+    struct list_head depletedq;  /* unordered list of depleted vcpus */
+    struct list_head replq;      /* ordered list of vcpus that need replenishment */
+    cpumask_t tickled;           /* cpus been tickled */
+    struct timer *repl_timer;    /* replenishment timer */
 };
 
 /*
  * Virtual CPU
  */
 struct rt_vcpu {
-    struct list_head q_elem;    /* on the runq/depletedq list */
-    struct list_head replq_elem;/* on the repl event list */
+    struct list_head q_elem;     /* on the runq/depletedq list */
+    struct list_head replq_elem; /* on the repl event list */
 
     /* Up-pointers */
     struct rt_dom *sdom;
@@ -191,19 +191,19 @@ struct rt_vcpu {
     s_time_t budget;
 
     /* VCPU current infomation in nanosecond */
-    s_time_t cur_budget;        /* current budget */
-    s_time_t last_start;        /* last start time */
-    s_time_t cur_deadline;      /* current deadline for EDF */
+    s_time_t cur_budget;         /* current budget */
+    s_time_t last_start;         /* last start time */
+    s_time_t cur_deadline;       /* current deadline for EDF */
 
-    unsigned flags;             /* mark __RTDS_scheduled, etc.. */
+    unsigned flags;              /* mark __RTDS_scheduled, etc.. */
 };
 
 /*
  * Domain
  */
 struct rt_dom {
-    struct list_head sdom_elem; /* link list on rt_priv */
-    struct domain *dom;         /* pointer to upper domain */
+    struct list_head sdom_elem;  /* link list on rt_priv */
+    struct domain *dom;          /* pointer to upper domain */
 };
 
 /*
@@ -435,6 +435,7 @@ static inline int
 deadline_queue_remove(struct list_head *queue, struct list_head *elem)
 {
     int pos = 0;
+
     if ( queue->next != elem )
         pos = 1;
 
@@ -489,7 +490,7 @@ deadline_queue_insert(struct rt_vcpu * (*_get_q_elem)(struct list_head *elem),
     struct list_head *iter;
     int pos = 0;
 
-    list_for_each(iter, queue)
+    list_for_each( iter, queue )
     {
         struct rt_vcpu * iter_svc = (*_get_q_elem)(iter);
         if ( svc->cur_deadline <= iter_svc->cur_deadline )
@@ -887,7 +888,7 @@ burn_budget(const struct scheduler *ops, struct rt_vcpu *svc, s_time_t now)
 
     svc->cur_budget -= delta;
 
-    if ( svc->cur_budget < 0 )
+    if ( svc->cur_budget <= 0 )
     {    
         svc->cur_budget = 0;
         /* 
@@ -1346,7 +1347,7 @@ static void repl_handler(void *data){
          * to put it to the correct place since
          * its deadline changes.
          */
-        if( __vcpu_on_q(svc) )
+        if ( __vcpu_on_q(svc) )
         {
             /* put back to runq */
             __q_remove(svc);
@@ -1362,7 +1363,7 @@ static void repl_handler(void *data){
         vc = svc->vcpu;
 
         if ( curr_on_cpu(vc->processor) == vc && 
-                 ( !list_empty(runq) ) )
+             ( !list_empty(runq) ) )
         {
             /*
              * If the vcpu is running, let the head
@@ -1370,12 +1371,12 @@ static void repl_handler(void *data){
              * higher priority.
              */
             struct rt_vcpu *next_on_runq = __q_elem(runq->next);
-            if ( svc->cur_deadline >= next_on_runq->cur_deadline )
+            if ( svc->cur_deadline > next_on_runq->cur_deadline )
                 runq_tickle(ops, next_on_runq);
         }
         else if ( __vcpu_on_q(svc) )
         {
-            /* Only tickle a vcpu that was depleted. */
+            /* Only need to tickle a vcpu that was depleted. */
             if ( test_and_clear_bit(__RTDS_was_depleted, &svc->flags) )
                 runq_tickle(ops, svc);
         }
@@ -1389,7 +1390,7 @@ static void repl_handler(void *data){
      * Use the vcpu that's on the top of the run queue.
      * Otherwise don't program the timer.
      */
-    if( !list_empty(replq) )
+    if ( !list_empty(replq) )
         set_timer(repl_timer, replq_elem(replq->next)->cur_deadline);
 
     spin_unlock_irqrestore(&prv->lock, flags);
