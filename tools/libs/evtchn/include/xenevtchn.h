@@ -28,12 +28,12 @@
 #include <xen/event_channel.h>
 
 /* A port identifier is guaranteed to fit in 31 bits. */
-typedef int evtchn_port_or_error_t;
+typedef int xenevtchn_port_or_error_t;
 
 typedef struct xenevtchn_handle xenevtchn_handle;
 
 /* Callers who don't care don't need to #include <xentoollog.h> */
-typedef struct xentoollog_logger xentoollog_logger;
+struct xentoollog_logger;
 
 /*
  * EVENT CHANNEL FUNCTIONS
@@ -66,7 +66,8 @@ typedef struct xentoollog_logger xentoollog_logger;
  * xenevtchn_handle which has been inherited.
  */
 /* Currently no flags are defined */
-xenevtchn_handle *xenevtchn_open(xentoollog_logger *logger, unsigned open_flags);
+xenevtchn_handle *xenevtchn_open(struct xentoollog_logger *logger,
+                                 unsigned open_flags);
 
 /*
  * Close a handle previously allocated with xenevtchn_open().
@@ -100,14 +101,14 @@ int xenevtchn_notify(xenevtchn_handle *xce, evtchn_port_t port);
  * Returns a new event port awaiting interdomain connection from the given
  * domain ID, or -1 on failure, in which case errno will be set appropriately.
  */
-evtchn_port_or_error_t
+xenevtchn_port_or_error_t
 xenevtchn_bind_unbound_port(xenevtchn_handle *xce, uint32_t domid);
 
 /*
  * Returns a new event port bound to the remote port for the given domain ID,
  * or -1 on failure, in which case errno will be set appropriately.
  */
-evtchn_port_or_error_t
+xenevtchn_port_or_error_t
 xenevtchn_bind_interdomain(xenevtchn_handle *xce, uint32_t domid,
                            evtchn_port_t remote_port);
 
@@ -115,7 +116,7 @@ xenevtchn_bind_interdomain(xenevtchn_handle *xce, uint32_t domid,
  * Bind an event channel to the given VIRQ. Returns the event channel bound to
  * the VIRQ, or -1 on failure, in which case errno will be set appropriately.
  */
-evtchn_port_or_error_t
+xenevtchn_port_or_error_t
 xenevtchn_bind_virq(xenevtchn_handle *xce, unsigned int virq);
 
 /*
@@ -141,7 +142,7 @@ int xenevtchn_unbind(xenevtchn_handle *xce, evtchn_port_t port);
  * xenevtchn_unmask (if you want to receive any further
  * notifications).
  */
-evtchn_port_or_error_t
+xenevtchn_port_or_error_t
 xenevtchn_pending(xenevtchn_handle *xce);
 
 /*

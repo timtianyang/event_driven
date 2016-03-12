@@ -64,7 +64,7 @@ else
 LIBXL_OBJS-y += libxl_no_convert_callout.o
 endif
 
-LIBXL_OBJS-y += libxl_remus_device.o libxl_remus_disk_drbd.o
+LIBXL_OBJS-y += libxl_remus.o libxl_checkpoint_device.o libxl_remus_disk_drbd.o
 
 LIBXL_OBJS-$(CONFIG_X86) += libxl_cpuid.o libxl_x86.o libxl_psr.o
 LIBXL_OBJS-$(CONFIG_ARM) += libxl_nocpuid.o libxl_arm.o libxl_libfdt_compat.o
@@ -105,7 +105,7 @@ LIBXL_OBJS = flexarray.o libxl.o libxl_create.o libxl_dm.o libxl_pci.o \
 			libxl_stream_read.o libxl_stream_write.o \
 			libxl_save_callout.o _libxl_save_msgs_callout.o \
 			libxl_qmp.o libxl_event.o libxl_fork.o \
-			libxl_dom_suspend.o $(LIBXL_OBJS-y)
+			libxl_dom_suspend.o libxl_dom_save.o $(LIBXL_OBJS-y)
 LIBXL_OBJS += libxl_genid.o
 LIBXL_OBJS += _libxl_types.o libxl_flask.o _libxl_types_internal.o
 

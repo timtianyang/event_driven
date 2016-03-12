@@ -11,6 +11,7 @@
 #define __exit            __text_section(".exit.text")
 #define __initdata        __section(".init.data")
 #define __initconst       __section(".init.rodata")
+#define __initconstrel    __section(".init.rodata.rel")
 #define __exitdata        __used_section(".exit.data")
 #define __initsetup       __used_section(".init.setup")
 #define __init_call(lvl)  __used_section(".initcall" lvl ".init")
@@ -78,42 +79,38 @@ struct kernel_param {
         OPT_STR,
         OPT_UINT,
         OPT_BOOL,
-        OPT_INVBOOL,
         OPT_SIZE,
         OPT_CUSTOM
     } type;
-    void *var;
     unsigned int len;
+    void *var;
 };
 
 extern struct kernel_param __setup_start, __setup_end;
 
 #define __setup_str static __initdata __attribute__((__aligned__(1))) char
-#define __kparam static __initsetup struct kernel_param
+#define __kparam static __initsetup \
+    __attribute__((__aligned__(sizeof(void *)))) struct kernel_param
 
 #define custom_param(_name, _var) \
     __setup_str __setup_str_##_var[] = _name; \
-    __kparam __setup_##_var = { __setup_str_##_var, OPT_CUSTOM, _var, 0 }
+    __kparam __setup_##_var = { __setup_str_##_var, OPT_CUSTOM, 0, _var }
 #define boolean_param(_name, _var) \
     __setup_str __setup_str_##_var[] = _name; \
     __kparam __setup_##_var = \
-        { __setup_str_##_var, OPT_BOOL, &_var, sizeof(_var) }
-#define invbool_param(_name, _var) \
-    __setup_str __setup_str_##_var[] = _name; \
-    __kparam __setup_##_var = \
-        { __setup_str_##_var, OPT_INVBOOL, &_var, sizeof(_var) }
+        { __setup_str_##_var, OPT_BOOL, sizeof(_var), &_var }
 #define integer_param(_name, _var) \
     __setup_str __setup_str_##_var[] = _name; \
     __kparam __setup_##_var = \
-        { __setup_str_##_var, OPT_UINT, &_var, sizeof(_var) }
+        { __setup_str_##_var, OPT_UINT, sizeof(_var), &_var }
 #define size_param(_name, _var) \
     __setup_str __setup_str_##_var[] = _name; \
     __kparam __setup_##_var = \
-        { __setup_str_##_var, OPT_SIZE, &_var, sizeof(_var) }
+        { __setup_str_##_var, OPT_SIZE, sizeof(_var), &_var }
 #define string_param(_name, _var) \
     __setup_str __setup_str_##_var[] = _name; \
     __kparam __setup_##_var = \
-        { __setup_str_##_var, OPT_STR, &_var, sizeof(_var) }
+        { __setup_str_##_var, OPT_STR, sizeof(_var), &_var }
 
 #endif /* __ASSEMBLY__ */
 

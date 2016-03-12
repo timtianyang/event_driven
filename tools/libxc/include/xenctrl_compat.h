@@ -51,21 +51,22 @@ void *xc_map_foreign_bulk(xc_interface *xch, uint32_t dom, int prot,
 #ifdef XC_WANT_COMPAT_EVTCHN_API
 
 typedef struct xenevtchn_handle xc_evtchn;
+typedef xc_evtchn_port_or_error_t evtchn_port_or_error_t;
 
 xc_evtchn *xc_evtchn_open(xentoollog_logger *logger,
                              unsigned open_flags);
 int xc_evtchn_close(xc_evtchn *xce);
 int xc_evtchn_fd(xc_evtchn *xce);
 int xc_evtchn_notify(xc_evtchn *xce, evtchn_port_t port);
-evtchn_port_or_error_t
+xc_evtchn_port_or_error_t
 xc_evtchn_bind_unbound_port(xc_evtchn *xce, int domid);
-evtchn_port_or_error_t
+xc_evtchn_port_or_error_t
 xc_evtchn_bind_interdomain(xc_evtchn *xce, int domid,
                            evtchn_port_t remote_port);
-evtchn_port_or_error_t
+xc_evtchn_port_or_error_t
 xc_evtchn_bind_virq(xc_evtchn *xce, unsigned int virq);
 int xc_evtchn_unbind(xc_evtchn *xce, evtchn_port_t port);
-evtchn_port_or_error_t
+xc_evtchn_port_or_error_t
 xc_evtchn_pending(xc_evtchn *xce);
 int xc_evtchn_unmask(xc_evtchn *xce, evtchn_port_t port);
 

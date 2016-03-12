@@ -423,6 +423,8 @@ static void xc_cpuid_hvm_policy(xc_interface *xch,
                         bitmaskof(X86_FEATURE_ERMS) |
                         bitmaskof(X86_FEATURE_INVPCID) |
                         bitmaskof(X86_FEATURE_RTM)  |
+                        ((info->xfeature_mask != 0) ?
+                        bitmaskof(X86_FEATURE_MPX) : 0)  |
                         bitmaskof(X86_FEATURE_RDSEED)  |
                         bitmaskof(X86_FEATURE_ADX)  |
                         bitmaskof(X86_FEATURE_SMAP) |
@@ -430,9 +432,11 @@ static void xc_cpuid_hvm_policy(xc_interface *xch,
                         bitmaskof(X86_FEATURE_PCOMMIT) |
                         bitmaskof(X86_FEATURE_CLWB) |
                         bitmaskof(X86_FEATURE_CLFLUSHOPT));
+            regs[2] &= bitmaskof(X86_FEATURE_PKU);
         } else
-            regs[1] = 0;
-        regs[0] = regs[2] = regs[3] = 0;
+            regs[1] = regs[2] = 0;
+
+        regs[0] = regs[3] = 0;
         break;
 
     case 0x0000000d:
@@ -541,6 +545,7 @@ static void xc_cpuid_pv_policy(xc_interface *xch,
 
     case 0x00000007:
         if ( input[1] == 0 )
+        {
             regs[1] &= (bitmaskof(X86_FEATURE_BMI1) |
                         bitmaskof(X86_FEATURE_HLE)  |
                         bitmaskof(X86_FEATURE_AVX2) |
@@ -550,6 +555,9 @@ static void xc_cpuid_pv_policy(xc_interface *xch,
                         bitmaskof(X86_FEATURE_RDSEED)  |
                         bitmaskof(X86_FEATURE_ADX)  |
                         bitmaskof(X86_FEATURE_FSGSBASE));
+            if ( info->xfeature_mask == 0 )
+                clear_bit(X86_FEATURE_MPX, regs[1]);
+        }
         else
             regs[1] = 0;
         regs[0] = regs[2] = regs[3] = 0;

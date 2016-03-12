@@ -124,6 +124,11 @@ struct arch_domain
     } vuart;
 
     unsigned int evtchn_irq;
+#ifdef CONFIG_ACPI
+    void *efi_acpi_table;
+    paddr_t efi_acpi_gpa;
+    paddr_t efi_acpi_len;
+#endif
 }  __cacheline_aligned;
 
 struct arch_vcpu
@@ -309,6 +314,8 @@ static inline void free_vcpu_guest_context(struct vcpu_guest_context *vgc)
 {
     xfree(vgc);
 }
+
+static inline void arch_vcpu_block(struct vcpu *v) {}
 
 #endif /* __ASM_DOMAIN_H__ */
 

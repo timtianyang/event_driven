@@ -28,6 +28,13 @@
 #include <public/hvm/ioreq.h>
 #include <xen/mm.h>
 
+#ifndef NDEBUG
+/* Permit use of the Forced Emulation Prefix in HVM guests */
+extern bool_t opt_hvm_fep;
+#else
+#define opt_hvm_fep 0
+#endif
+
 /* Interrupt acknowledgement sources. */
 enum hvm_intsrc {
     hvm_intsrc_none,
@@ -136,6 +143,8 @@ struct hvm_function_table {
     void (*update_guest_cr)(struct vcpu *v, unsigned int cr);
     void (*update_guest_efer)(struct vcpu *v);
 
+    void (*update_guest_vendor)(struct vcpu *v);
+
     int  (*get_guest_pat)(struct vcpu *v, u64 *);
     int  (*set_guest_pat)(struct vcpu *v, u64);
 
@@ -213,7 +222,19 @@ struct hvm_function_table {
     bool_t (*altp2m_vcpu_emulate_ve)(struct vcpu *v);
     int (*altp2m_vcpu_emulate_vmfunc)(struct cpu_user_regs *regs);
 
-    uint64_t (*scale_tsc)(const struct vcpu *v, uint64_t tsc);
+    /*
+     * Parameters and callbacks for hardware-assisted TSC scaling,
+     * which are valid only when the hardware feature is available.
+     */
+    struct {
+        /* number of bits of the fractional part of TSC scaling ratio */
+        uint8_t  ratio_frac_bits;
+        /* maximum-allowed TSC scaling ratio */
+        uint64_t max_ratio;
+
+        /* Architecture function to setup TSC scaling ratio */
+        void (*setup)(struct vcpu *v);
+    } tsc_scaling;
 };
 
 extern struct hvm_function_table hvm_funcs;
@@ -249,6 +270,18 @@ void hvm_set_guest_tsc_fixed(struct vcpu *v, u64 guest_tsc, u64 at_tsc);
 u64 hvm_get_guest_tsc_fixed(struct vcpu *v, u64 at_tsc);
 #define hvm_get_guest_tsc(v) hvm_get_guest_tsc_fixed(v, 0)
 
+#define hvm_tsc_scaling_supported \
+    (!!hvm_funcs.tsc_scaling.ratio_frac_bits)
+
+#define hvm_default_tsc_scaling_ratio \
+    (1ULL << hvm_funcs.tsc_scaling.ratio_frac_bits)
+
+#define hvm_tsc_scaling_ratio(d) \
+    ((d)->arch.hvm_domain.tsc_scaling_ratio)
+
+u64 hvm_scale_tsc(const struct domain *d, u64 tsc);
+u64 hvm_get_tsc_scaling_ratio(u32 gtsc_khz);
+
 int hvm_set_mode(struct vcpu *v, int mode);
 void hvm_init_guest_time(struct domain *d);
 void hvm_set_guest_time(struct vcpu *v, u64 guest_time);
@@ -277,6 +310,8 @@ int hvm_girq_dest_2_vcpu_id(struct domain *d, uint8_t dest, uint8_t dest_mode);
     (hvm_paging_enabled(v) && ((v)->arch.hvm_vcpu.guest_cr[4] & X86_CR4_SMAP))
 #define hvm_nx_enabled(v) \
     (!!((v)->arch.hvm_vcpu.guest_efer & EFER_NX))
+#define hvm_pku_enabled(v) \
+    (hvm_paging_enabled(v) && ((v)->arch.hvm_vcpu.guest_cr[4] & X86_CR4_PKE))
 
 /* Can we use superpages in the HAP p2m table? */
 #define hap_has_1gb (!!(hvm_funcs.hap_capabilities & HVM_HAP_SUPERPAGE_1GB))
@@ -314,6 +349,11 @@ static inline void hvm_update_guest_cr(struct vcpu *v, unsigned int cr)
 static inline void hvm_update_guest_efer(struct vcpu *v)
 {
     hvm_funcs.update_guest_efer(v);
+}
+
+static inline void hvm_update_guest_vendor(struct vcpu *v)
+{
+    hvm_funcs.update_guest_vendor(v);
 }
 
 /*
@@ -387,7 +427,6 @@ static inline int hvm_event_pending(struct vcpu *v)
 
 /* These exceptions must always be intercepted. */
 #define HVM_TRAP_MASK ((1U << TRAP_debug)           | \
-                       (1U << TRAP_invalid_op)      | \
                        (1U << TRAP_alignment_check) | \
                        (1U << TRAP_machine_check))
 
@@ -566,6 +605,19 @@ bool_t altp2m_vcpu_emulate_ve(struct vcpu *v);
 const char *hvm_efer_valid(const struct vcpu *v, uint64_t value,
                            signed int cr0_pg);
 unsigned long hvm_cr4_guest_reserved_bits(const struct vcpu *v, bool_t restore);
+
+/*
+ * This must be defined as a macro instead of an inline function,
+ * because it uses 'struct vcpu' and 'struct domain' which have
+ * not been defined yet.
+ */
+#define arch_vcpu_block(v) ({                                   \
+    struct vcpu *v_ = (v);                                      \
+    struct domain *d_ = v_->domain;                             \
+    if ( has_hvm_container_domain(d_) &&                        \
+         d_->arch.hvm_domain.vmx.vcpu_block )                   \
+        d_->arch.hvm_domain.vmx.vcpu_block(v_);                 \
+})
 
 #endif /* __ASM_X86_HVM_HVM_H__ */
 

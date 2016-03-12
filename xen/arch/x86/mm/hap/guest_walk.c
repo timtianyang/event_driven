@@ -82,7 +82,7 @@ unsigned long hap_p2m_ga_to_gfn(GUEST_PAGING_LEVELS)(
     if ( !top_page )
     {
         pfec[0] &= ~PFEC_page_present;
-        return INVALID_GFN;
+        goto out_tweak_pfec;
     }
     top_mfn = _mfn(page_to_mfn(top_page));
 
@@ -130,11 +130,22 @@ unsigned long hap_p2m_ga_to_gfn(GUEST_PAGING_LEVELS)(
     if ( missing & _PAGE_INVALID_BITS ) 
         pfec[0] |= PFEC_reserved_bit;
 
+    if ( missing & _PAGE_PKEY_BITS )
+        pfec[0] |= PFEC_prot_key;
+
     if ( missing & _PAGE_PAGED )
         pfec[0] = PFEC_page_paged;
 
     if ( missing & _PAGE_SHARED )
         pfec[0] = PFEC_page_shared;
+
+ out_tweak_pfec:
+    /*
+     * SDM Intel 64 Volume 3, Chapter Paging, PAGE-FAULT EXCEPTIONS:
+     * The PFEC_insn_fetch flag is set only when NX or SMEP are enabled.
+     */
+    if ( !hvm_nx_enabled(v) && !hvm_smep_enabled(v) )
+        pfec[0] &= ~PFEC_insn_fetch;
 
     return INVALID_GFN;
 }

@@ -34,13 +34,15 @@
 #define XSTATE_OPMASK  (1ULL << 5)
 #define XSTATE_ZMM     (1ULL << 6)
 #define XSTATE_HI_ZMM  (1ULL << 7)
+#define XSTATE_PKRU    (1ULL << 9)
 #define XSTATE_LWP     (1ULL << 62) /* AMD lightweight profiling */
 #define XSTATE_FP_SSE  (XSTATE_FP | XSTATE_SSE)
 #define XCNTXT_MASK    (XSTATE_FP | XSTATE_SSE | XSTATE_YMM | XSTATE_OPMASK | \
                         XSTATE_ZMM | XSTATE_HI_ZMM | XSTATE_NONLAZY)
 
 #define XSTATE_ALL     (~(1ULL << 63))
-#define XSTATE_NONLAZY (XSTATE_LWP | XSTATE_BNDREGS | XSTATE_BNDCSR)
+#define XSTATE_NONLAZY (XSTATE_LWP | XSTATE_BNDREGS | XSTATE_BNDCSR | \
+                        XSTATE_PKRU)
 #define XSTATE_LAZY    (XSTATE_ALL & ~XSTATE_NONLAZY)
 #define XSTATE_COMPACTION_ENABLED  (1ULL << 63)
 
@@ -48,9 +50,9 @@ extern u64 xfeature_mask;
 extern unsigned int *xstate_sizes;
 
 /* extended state save area */
-struct __packed __attribute__((aligned (64))) xsave_struct
+struct __attribute__((aligned (64))) xsave_struct
 {
-    union {                                  /* FPU/MMX, SSE */
+    union __attribute__((aligned(16))) {     /* FPU/MMX, SSE */
         char x[512];
         struct {
             uint16_t fcw;
@@ -72,14 +74,13 @@ struct __packed __attribute__((aligned (64))) xsave_struct
         };
     } fpu_sse;
 
-    struct {
+    struct xsave_hdr {
         u64 xstate_bv;
         u64 xcomp_bv;
         u64 reserved[6];
     } xsave_hdr;                             /* The 64-byte header */
 
-    struct { char x[XSTATE_YMM_SIZE]; } ymm; /* YMM */
-    char   data[];                           /* Future new states */
+    char data[];                             /* Variable layout states */
 };
 
 /* extended state operations */
@@ -90,7 +91,8 @@ uint64_t get_msr_xss(void);
 void xsave(struct vcpu *v, uint64_t mask);
 void xrstor(struct vcpu *v, uint64_t mask);
 bool_t xsave_enabled(const struct vcpu *v);
-int __must_check validate_xstate(u64 xcr0, u64 xcr0_accum, u64 xstate_bv);
+int __must_check validate_xstate(u64 xcr0, u64 xcr0_accum,
+                                 const struct xsave_hdr *);
 int __must_check handle_xsetbv(u32 index, u64 new_bv);
 void expand_xsave_states(struct vcpu *v, void *dest, unsigned int size);
 void compress_xsave_states(struct vcpu *v, const void *src, unsigned int size);

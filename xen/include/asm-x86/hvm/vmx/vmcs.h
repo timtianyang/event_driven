@@ -77,6 +77,65 @@ struct vmx_domain {
     unsigned long apic_access_mfn;
     /* VMX_DOMAIN_* */
     unsigned int status;
+
+    /*
+     * To handle posted interrupts correctly, we need to set the following
+     * state:
+     *
+     * * The PI notification vector (NV)
+     * * The PI notification destination processor (NDST)
+     * * The PI "suppress notification" bit (SN)
+     * * The vcpu pi "blocked" list
+     *
+     * If a VM is currently running, we want the PI delivered to the guest vcpu
+     * on the proper pcpu (NDST = v->processor, SN clear).
+     *
+     * If the vm is blocked, we want the PI delivered to Xen so that it can
+     * wake it up  (SN clear, NV = pi_wakeup_vector, vcpu on block list).
+     *
+     * If the VM is currently either preempted or offline (i.e., not running
+     * because of some reason other than blocking waiting for an interrupt),
+     * there's nothing Xen can do -- we want the interrupt pending bit set in
+     * the guest, but we don't want to bother Xen with an interrupt (SN clear).
+     *
+     * There's a brief window of time between vmx_intr_assist() and checking
+     * softirqs where if an interrupt comes in it may be lost; so we need Xen
+     * to get an interrupt and raise a softirq so that it will go through the
+     * vmx_intr_assist() path again (SN clear, NV = posted_interrupt).
+     *
+     * The way we implement this now is by looking at what needs to happen on
+     * the following runstate transitions:
+     *
+     * A: runnable -> running
+     *  - SN = 0
+     *  - NDST = v->processor
+     * B: running -> runnable
+     *  - SN = 1
+     * C: running -> blocked
+     *  - NV = pi_wakeup_vector
+     *  - Add vcpu to blocked list
+     * D: blocked -> runnable
+     *  - NV = posted_intr_vector
+     *  - Take vcpu off blocked list
+     *
+     * For transitions A and B, we add hooks into vmx_ctxt_switch_{from,to}
+     * paths.
+     *
+     * For transition C, we add a new arch hook, arch_vcpu_block(), which is
+     * called from vcpu_block() and vcpu_do_poll().
+     *
+     * For transition D, rather than add an extra arch hook on vcpu_wake, we
+     * add a hook on the vmentry path which checks to see if either of the two
+     * actions need to be taken.
+     *
+     * These hooks only need to be called when the domain in question actually
+     * has a physical device assigned to it, so we set and clear the callbacks
+     * as appropriate when device assignment changes.
+     */
+    void (*vcpu_block) (struct vcpu *);
+    void (*pi_switch_from) (struct vcpu *v);
+    void (*pi_switch_to) (struct vcpu *v);
+    void (*pi_do_resume) (struct vcpu *v);
 };
 
 struct pi_desc {
@@ -101,11 +160,16 @@ struct pi_desc {
 
 #define NR_PML_ENTRIES   512
 
+struct pi_blocking_vcpu {
+    struct list_head     list;
+    spinlock_t           *lock;
+};
+
 struct arch_vmx_struct {
     /* Physical address of VMCS. */
     paddr_t              vmcs_pa;
     /* VMCS shadow machine address. */
-    paddr_t             vmcs_shadow_maddr;
+    paddr_t              vmcs_shadow_maddr;
 
     /* Protects remote usage of VMCS (VMPTRLD/VMCLEAR). */
     spinlock_t           vmcs_lock;
@@ -160,6 +224,13 @@ struct arch_vmx_struct {
     struct page_info     *vmwrite_bitmap;
 
     struct page_info     *pml_pg;
+
+    /*
+     * Before it is blocked, vCPU is added to the per-cpu list.
+     * VT-d engine can send wakeup notification event to the
+     * pCPU and wakeup the related vCPU.
+     */
+    struct pi_blocking_vcpu pi_blocking;
 };
 
 int vmx_create_vmcs(struct vcpu *v);
@@ -237,6 +308,7 @@ extern u32 vmx_vmentry_control;
 #define SECONDARY_EXEC_ENABLE_VIRT_EXCEPTIONS   0x00040000
 #define SECONDARY_EXEC_XSAVES                   0x00100000
 #define SECONDARY_EXEC_PCOMMIT                  0x00200000
+#define SECONDARY_EXEC_TSC_SCALING              0x02000000
 extern u32 vmx_secondary_exec_control;
 
 #define VMX_EPT_EXEC_ONLY_SUPPORTED                         0x00000001
@@ -258,6 +330,8 @@ extern u64 vmx_ept_vpid_cap;
 
 #define VMX_MISC_CR3_TARGET                     0x01ff0000
 #define VMX_MISC_VMWRITE_ALL                    0x20000000
+
+#define VMX_TSC_MULTIPLIER_MAX                  0xffffffffffffffffULL
 
 #define cpu_has_wbinvd_exiting \
     (vmx_secondary_exec_control & SECONDARY_EXEC_WBINVD_EXITING)
@@ -306,6 +380,9 @@ extern u64 vmx_ept_vpid_cap;
     (vmx_secondary_exec_control & SECONDARY_EXEC_XSAVES)
 #define cpu_has_vmx_pcommit \
     (vmx_secondary_exec_control & SECONDARY_EXEC_PCOMMIT)
+#define cpu_has_vmx_tsc_scaling \
+    (vmx_secondary_exec_control & SECONDARY_EXEC_TSC_SCALING)
+
 #define VMCS_RID_TYPE_MASK              0x80000000
 
 /* GUEST_INTERRUPTIBILITY_INFO flags. */
@@ -380,6 +457,7 @@ enum vmcs_field {
     VMWRITE_BITMAP                  = 0x00002028,
     VIRT_EXCEPTION_INFO             = 0x0000202a,
     XSS_EXIT_BITMAP                 = 0x0000202c,
+    TSC_MULTIPLIER                  = 0x00002032,
     GUEST_PHYSICAL_ADDRESS          = 0x00002400,
     VMCS_LINK_POINTER               = 0x00002800,
     GUEST_IA32_DEBUGCTL             = 0x00002802,
@@ -508,10 +586,10 @@ void vmx_vmcs_switch(paddr_t from, paddr_t to);
 void vmx_set_eoi_exit_bitmap(struct vcpu *v, u8 vector);
 void vmx_clear_eoi_exit_bitmap(struct vcpu *v, u8 vector);
 int vmx_check_msr_bitmap(unsigned long *msr_bitmap, u32 msr, int access_type);
-void virtual_vmcs_enter(void *vvmcs);
-void virtual_vmcs_exit(void *vvmcs);
-u64 virtual_vmcs_vmread(void *vvmcs, u32 vmcs_encoding);
-void virtual_vmcs_vmwrite(void *vvmcs, u32 vmcs_encoding, u64 val);
+void virtual_vmcs_enter(const struct vcpu *);
+void virtual_vmcs_exit(const struct vcpu *);
+u64 virtual_vmcs_vmread(const struct vcpu *, u32 encoding);
+void virtual_vmcs_vmwrite(const struct vcpu *, u32 encoding, u64 val);
 
 static inline int vmx_add_guest_msr(u32 msr)
 {

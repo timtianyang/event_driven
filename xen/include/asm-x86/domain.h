@@ -248,6 +248,8 @@ struct pv_domain
 {
     l1_pgentry_t **gdt_ldt_l1tab;
 
+    atomic_t nr_l4_pages;
+
     /* map_domain_page() mapping cache. */
     struct mapcache_domain mapcache;
 };
@@ -337,6 +339,21 @@ struct arch_domain
     u8 x86_vendor;           /* CPU vendor */
     u8 x86_model;            /* CPU model */
 
+    /*
+     * The width of the FIP/FDP register in the FPU that needs to be
+     * saved/restored during a context switch.  This is needed because
+     * the FPU can either: a) restore the 64-bit FIP/FDP and clear FCS
+     * and FDS; or b) restore the 32-bit FIP/FDP (clearing the upper
+     * 32-bits of FIP/FDP) and restore FCS/FDS.
+     *
+     * Which one is needed depends on the guest.
+     *
+     * This can be either: 8, 4 or 0.  0 means auto-detect the size
+     * based on the width of FIP/FDP values that are written by the
+     * guest.
+     */
+    uint8_t x87_fip_width;
+
     cpuid_input_t *cpuids;
 
     struct PITState vpit;
@@ -374,7 +391,7 @@ struct arch_domain
     unsigned long *pirq_eoi_map;
     unsigned long pirq_eoi_map_mfn;
 
-    /* Monitor options */
+    /* Arch-specific monitor options */
     struct {
         unsigned int write_ctrlreg_enabled       : 4;
         unsigned int write_ctrlreg_sync          : 4;
@@ -383,12 +400,9 @@ struct arch_domain
         unsigned int mov_to_msr_extended         : 1;
         unsigned int singlestep_enabled          : 1;
         unsigned int software_breakpoint_enabled : 1;
-        unsigned int guest_request_enabled       : 1;
-        unsigned int guest_request_sync          : 1;
     } monitor;
 
     /* Mem_access emulation control */
-    bool_t mem_access_emulate_enabled;
     bool_t mem_access_emulate_each_rep;
 
     /* Emulated devices enabled bitmap. */

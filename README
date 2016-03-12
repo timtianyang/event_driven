@@ -35,9 +35,16 @@ Second, there are a number of prerequisites for building a Xen source
 release. Make sure you have all the following installed, either by
 visiting the project webpage or installing a pre-built package
 provided by your OS distributor:
-    * GCC v4.1 or later
-    * GNU Make
-    * GNU Binutils
+    * GNU Make v3.80 or later
+    * C compiler and linker:
+      - For x86:
+        - GCC 4.1.2_20070115 or later
+        - GNU Binutils 2.16.91.0.5 or later
+        or
+        - Clang/LLVM 3.5 or later
+      - For ARM:
+        - GCC 4.8 or later
+        - GNU Binutils 2.24 or later
     * Development install of zlib (e.g., zlib-dev)
     * Development install of Python v2.3 or later (e.g., python-dev)
     * Development install of curses (e.g., libncurses-dev)
@@ -54,7 +61,6 @@ provided by your OS distributor:
     * iproute package (/sbin/ip)
     * GNU bison and GNU flex
     * GNU gettext
-    * 16-bit x86 assembler, loader and compiler (dev86 rpm or bin86 & bcc debs)
     * ACPI ASL compiler (iasl)
     * Libc multiarch package (e.g. libc6-dev-i386 / glibc-devel.i686).
       Required when building on a 64-bit platform to build
@@ -74,6 +80,8 @@ disabled at compile time:
       libnl-3-dev, etc).  Required if network buffering is desired
       when using Remus with libxl.  See docs/README.remus for detailed
       information.
+    * 16-bit x86 assembler, loader and compiler for qemu-traditional / rombios
+      (dev86 rpm or bin86 & bcc debs)
 
 Second, you need to acquire a suitable kernel for use in domain 0. If
 possible you should use a kernel provided by your OS distributor. If

@@ -241,8 +241,6 @@ int sched_init_vcpu(struct vcpu *v, unsigned int processor)
     if ( v->sched_priv == NULL )
         return 1;
 
-    TRACE_2D(TRC_SCHED_DOM_ADD, v->domain->domain_id, v->vcpu_id);
-
     /* Idle VCPUs are scheduled immediately, so don't put them in runqueue. */
     if ( is_idle_domain(d) )
     {
@@ -369,19 +367,25 @@ void sched_destroy_vcpu(struct vcpu *v)
 int sched_init_domain(struct domain *d)
 {
     SCHED_STAT_CRANK(dom_init);
+    TRACE_1D(TRC_SCHED_DOM_ADD, d->domain_id);
     return SCHED_OP(DOM2OP(d), init_domain, d);
 }
 
 void sched_destroy_domain(struct domain *d)
 {
     SCHED_STAT_CRANK(dom_destroy);
+    TRACE_1D(TRC_SCHED_DOM_REM, d->domain_id);
     SCHED_OP(DOM2OP(d), destroy_domain, d);
 }
 
 void vcpu_sleep_nosync(struct vcpu *v)
 {
     unsigned long flags;
-    spinlock_t *lock = vcpu_schedule_lock_irqsave(v, &flags);
+    spinlock_t *lock;
+
+    TRACE_2D(TRC_SCHED_SLEEP, v->domain->domain_id, v->vcpu_id);
+
+    lock = vcpu_schedule_lock_irqsave(v, &flags);
 
     if ( likely(!vcpu_runnable(v)) )
     {
@@ -392,8 +396,6 @@ void vcpu_sleep_nosync(struct vcpu *v)
     }
 
     vcpu_schedule_unlock_irqrestore(lock, flags, v);
-
-    TRACE_2D(TRC_SCHED_SLEEP, v->domain->domain_id, v->vcpu_id);
 }
 
 void vcpu_sleep_sync(struct vcpu *v)
@@ -409,7 +411,11 @@ void vcpu_sleep_sync(struct vcpu *v)
 void vcpu_wake(struct vcpu *v)
 {
     unsigned long flags;
-    spinlock_t *lock = vcpu_schedule_lock_irqsave(v, &flags);
+    spinlock_t *lock;
+
+    TRACE_2D(TRC_SCHED_WAKE, v->domain->domain_id, v->vcpu_id);
+
+    lock = vcpu_schedule_lock_irqsave(v, &flags);
 
     if ( likely(vcpu_runnable(v)) )
     {
@@ -424,8 +430,6 @@ void vcpu_wake(struct vcpu *v)
     }
 
     vcpu_schedule_unlock_irqrestore(lock, flags, v);
-
-    TRACE_2D(TRC_SCHED_WAKE, v->domain->domain_id, v->vcpu_id);
 }
 
 void vcpu_unblock(struct vcpu *v)
@@ -799,6 +803,8 @@ void vcpu_block(void)
 
     set_bit(_VPF_blocked, &v->pause_flags);
 
+    arch_vcpu_block(v);
+
     /* Check for events /after/ blocking: avoids wakeup waiting race. */
     if ( local_events_need_delivery() )
     {
@@ -835,6 +841,8 @@ static long do_poll(struct sched_poll *sched_poll)
     set_bit(_VPF_blocked, &v->pause_flags);
     v->poll_evtchn = -1;
     set_bit(v->vcpu_id, d->poll_mask);
+
+    arch_vcpu_block(v);
 
 #ifndef CONFIG_X86 /* set_bit() implies mb() on x86 */
     /* Check for events /after/ setting flags: avoids wakeup waiting race. */
@@ -1167,8 +1175,8 @@ long sched_adjust_global(struct xen_sysctl_scheduler_op *op)
     if ( rc )
         return rc;
 
-    if ( (op->cmd != XEN_DOMCTL_SCHEDOP_putinfo) &&
-         (op->cmd != XEN_DOMCTL_SCHEDOP_getinfo) )
+    if ( (op->cmd != XEN_SYSCTL_SCHEDOP_putinfo) &&
+         (op->cmd != XEN_SYSCTL_SCHEDOP_getinfo) )
         return -EINVAL;
 
     pool = cpupool_get_by_id(op->cpupool_id);

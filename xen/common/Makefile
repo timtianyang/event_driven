@@ -1,5 +1,5 @@
 obj-y += bitmap.o
-obj-$(HAS_CORE_PARKING) += core_parking.o
+obj-$(CONFIG_CORE_PARKING) += core_parking.o
 obj-y += cpu.o
 obj-y += cpupool.o
 obj-$(CONFIG_HAS_DEVICE_TREE) += device_tree.o
@@ -20,6 +20,7 @@ obj-y += lib.o
 obj-y += lzo.o
 obj-$(CONFIG_HAS_MEM_ACCESS) += mem_access.o
 obj-y += memory.o
+obj-y += monitor.o
 obj-y += multicall.o
 obj-y += notifier.o
 obj-y += page_alloc.o
@@ -30,6 +31,7 @@ obj-y += rangeset.o
 obj-y += radix-tree.o
 obj-y += rbtree.o
 obj-y += rcupdate.o
+obj-y += rwlock.o
 obj-$(CONFIG_SCHED_ARINC653) += sched_arinc653.o
 obj-$(CONFIG_SCHED_CREDIT) += sched_credit.o
 obj-$(CONFIG_SCHED_CREDIT2) += sched_credit2.o
@@ -55,13 +57,13 @@ obj-y += vm_event.o
 obj-y += vmap.o
 obj-y += vsprintf.o
 obj-y += wait.o
+obj-$(CONFIG_XENOPROF) += xenoprof.o
 obj-y += xmalloc_tlsf.o
 
 obj-bin-$(CONFIG_X86) += $(foreach n,decompress bunzip2 unxz unlzma unlzo unlz4 earlycpio,$(n).init.o)
 
 obj-$(perfc)       += perfc.o
 obj-$(crash_debug) += gdbstub.o
-obj-$(xenoprof)    += xenoprof.o
 
 obj-$(CONFIG_COMPAT) += $(addprefix compat/,domain.o kernel.o memory.o multicall.o tmem_xen.o xlat.o)
 

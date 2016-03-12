@@ -574,8 +574,9 @@ int p2m_is_logdirty_range(struct p2m_domain *, unsigned long start,
 
 /* Set mmio addresses in the p2m table (for pass-through) */
 int set_mmio_p2m_entry(struct domain *d, unsigned long gfn, mfn_t mfn,
-                       p2m_access_t access);
-int clear_mmio_p2m_entry(struct domain *d, unsigned long gfn, mfn_t mfn);
+                       unsigned int order, p2m_access_t access);
+int clear_mmio_p2m_entry(struct domain *d, unsigned long gfn, mfn_t mfn,
+                         unsigned int order);
 
 /* Set identity addresses in the p2m table (for pass-through) */
 int set_identity_p2m_entry(struct domain *d, unsigned long gfn,
@@ -646,30 +647,6 @@ void p2m_mem_paging_resume(struct domain *d, vm_event_response_t *rsp);
 bool_t p2m_mem_access_check(paddr_t gpa, unsigned long gla,
                             struct npfec npfec,
                             vm_event_request_t **req_ptr);
-
-/*
- * Emulating a memory access requires custom handling. These non-atomic
- * functions should be called under domctl lock.
- */
-static inline
-int p2m_mem_access_enable_emulate(struct domain *d)
-{
-    if ( d->arch.mem_access_emulate_enabled )
-        return -EEXIST;
-
-    d->arch.mem_access_emulate_enabled = 1;
-    return 0;
-}
-
-static inline
-int p2m_mem_access_disable_emulate(struct domain *d)
-{
-    if ( !d->arch.mem_access_emulate_enabled )
-        return -EEXIST;
-
-    d->arch.mem_access_emulate_enabled = 0;
-    return 0;
-}
 
 /* Check for emulation and mark vcpu for skipping one instruction
  * upon rescheduling if required. */
@@ -807,10 +784,6 @@ int p2m_destroy_altp2m_by_id(struct domain *d, unsigned int idx);
 
 /* Switch alternate p2m for entire domain */
 int p2m_switch_domain_altp2m_by_id(struct domain *d, unsigned int idx);
-
-/* Set access type for a gfn */
-int p2m_set_altp2m_mem_access(struct domain *d, unsigned int idx,
-                              gfn_t gfn, xenmem_access_t access);
 
 /* Change a gfn->mfn mapping */
 int p2m_change_altp2m_gfn(struct domain *d, unsigned int idx,

@@ -8,6 +8,9 @@ config COMPAT
 	  HVM and PV guests. HVMLoader makes 32-bit hypercalls irrespective
 	  of the destination runmode of the guest.
 
+config CORE_PARKING
+	bool
+
 config FLASK
 	bool "FLux Advanced Security Kernel support"
 	default y
@@ -83,6 +86,19 @@ config LATE_HWDOM
 	  be combined with an IOMMU in strict mode.
 
 	  If unsure, say N.
+
+# Adds support for Xenoprof
+config XENOPROF
+	def_bool y
+	prompt "Xen Oprofile Support" if EXPERT = "y"
+	depends on X86
+	---help---
+	  Xen OProfile (Xenoprof) is a system-wide profiler for Xen virtual
+	  machine environments, capable of profiling the Xen virtual machine
+	  monitor, multiple Linux guest operating systems, and applications
+	  running on them.
+
+	  If unsure, say Y.
 
 # Enable/Disable XSM support
 config XSM

@@ -13,10 +13,10 @@
 #define BYTES_PER_LONG (1 << LONG_BYTEORDER)
 #define BITS_PER_LONG (BYTES_PER_LONG << 3)
 #define BITS_PER_BYTE 8
+#define POINTER_ALIGN BYTES_PER_LONG
 
 #define BITS_PER_XEN_ULONG BITS_PER_LONG
 
-#define CONFIG_X86 1
 #define CONFIG_PAGING_ASSISTANCE 1
 #define CONFIG_X86_LOCAL_APIC 1
 #define CONFIG_X86_GOOD_APIC 1
@@ -25,7 +25,6 @@
 #define CONFIG_HPET_TIMER 1
 #define CONFIG_X86_MCE_THERMAL 1
 #define CONFIG_HAVE_EFFICIENT_UNALIGNED_ACCESS 1
-#define CONFIG_NUMA 1
 #define CONFIG_DISCONTIGMEM 1
 #define CONFIG_NUMA_EMU 1
 #define CONFIG_DOMAIN_PAGE 1
@@ -37,17 +36,12 @@
 /* Intel P4 currently has largest cache line (L2 line size is 128 bytes). */
 #define CONFIG_X86_L1_CACHE_SHIFT 7
 
-#define CONFIG_ACPI 1
 #define CONFIG_ACPI_BOOT 1
 #define CONFIG_ACPI_SLEEP 1
 #define CONFIG_ACPI_NUMA 1
 #define CONFIG_ACPI_SRAT 1
 #define CONFIG_ACPI_CSTATE 1
 
-#define CONFIG_VGA 1
-#define CONFIG_VIDEO 1
-
-#define CONFIG_XENOPROF 1
 #define CONFIG_WATCHDOG 1
 
 #define CONFIG_MULTIBOOT 1
@@ -112,8 +106,6 @@ extern unsigned char boot_edid_info[128];
 #endif
 
 #define asmlinkage
-
-#define CONFIG_COMPAT 1
 
 #include <xen/const.h>
 

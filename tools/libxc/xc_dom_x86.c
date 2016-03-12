@@ -164,7 +164,7 @@ static int count_pgtables(struct xc_dom_image *dom, xen_vaddr_t from,
 
     for ( l = domx86->params->levels - 1; l >= 0; l-- )
     {
-        map->lvls[l].pfn = pfn + map->area.pgtables;
+        map->lvls[l].pfn = dom->pfn_alloc_end + map->area.pgtables;
         if ( l == domx86->params->levels - 1 )
         {
             /* Top level page table in first mapping only. */
@@ -238,8 +238,7 @@ static int alloc_pgtables(struct xc_dom_image *dom)
         try_virt_end = round_up(dom->virt_alloc_end + pages * PAGE_SIZE_X86,
                                 bits_to_mask(22)); /* 4MB alignment */
 
-        if ( count_pgtables(dom, dom->parms.virt_base, try_virt_end,
-                            dom->pfn_alloc_end) )
+        if ( count_pgtables(dom, dom->parms.virt_base, try_virt_end, 0) )
             return -1;
 
         pages = map->area.pgtables + extra_pages;
@@ -1412,8 +1411,15 @@ static int meminit_hvm(struct xc_dom_image *dom)
      * ensure that we can be preempted and hence dom0 remains responsive.
      */
     if ( dom->device_model )
+    {
         rc = xc_domain_populate_physmap_exact(
             xch, domid, 0xa0, 0, memflags, &dom->p2m_host[0x00]);
+        if ( rc != 0 )
+        {
+            DOMPRINTF("Could not populate low memory (< 0xA0).\n");
+            goto error_out;
+        }
+    }
 
     stat_normal_pages = 0;
     for ( vmemid = 0; vmemid < nr_vmemranges; vmemid++ )
@@ -1440,6 +1446,7 @@ static int meminit_hvm(struct xc_dom_image *dom)
         else
             cur_pages = vmemranges[vmemid].start >> PAGE_SHIFT;
 
+        rc = 0;
         while ( (rc == 0) && (end_pages > cur_pages) )
         {
             /* Clip count to maximum 1GB extent. */
@@ -1746,7 +1753,7 @@ static int bootlate_hvm(struct xc_dom_image *dom)
             start_info->nr_modules = 1;
         }
 
-        start_info->magic = HVM_START_MAGIC_VALUE;
+        start_info->magic = XEN_HVM_START_MAGIC_VALUE;
 
         munmap(start_page, start_info_size);
     }

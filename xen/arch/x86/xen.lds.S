@@ -38,6 +38,9 @@ SECTIONS
   . = __XEN_VIRT_START;
   __image_base__ = .;
 #endif
+
+  __2M_text_start = .;         /* Start of 2M superpages, mapped RX. */
+
   . = __XEN_VIRT_START + MB(1);
   _start = .;
   .text : {
@@ -50,6 +53,10 @@ SECTIONS
        _etext = .;             /* End of text section */
   } :text = 0x9090
 
+  . = ALIGN(MB(2));
+  __2M_text_end = .;
+
+  __2M_rodata_start = .;       /* Start of 2M superpages, mapped RO. */
   .rodata : {
        /* Bug frames table */
        . = ALIGN(4);
@@ -65,45 +72,19 @@ SECTIONS
 
        *(.rodata)
        *(.rodata.*)
-  } :text
-
-  . = ALIGN(SMP_CACHE_BYTES);
-  .data.read_mostly : {
-       /* Exception table */
-       __start___ex_table = .;
-       *(.ex_table)
-       __stop___ex_table = .;
-
-       /* Pre-exception table */
-       __start___pre_ex_table = .;
-       *(.ex_table.pre)
-       __stop___pre_ex_table = .;
-
-       *(.data.read_mostly)
-       . = ALIGN(8);
-       __start_schedulers_array = .;
-       *(.data.schedulers)
-       __end_schedulers_array = .;
-       *(.data.rel.ro)
-       *(.data.rel.ro.*)
-  } :text
-
-  .data : {                    /* Data */
-       . = ALIGN(PAGE_SIZE);
-       *(.data.page_aligned)
-       *(.data)
-       *(.data.rel)
-       *(.data.rel.*)
-       CONSTRUCTORS
-  } :text
 
 #ifdef LOCK_PROFILE
-  . = ALIGN(32);
-  __lock_profile_start = .;
-  .lockprofile.data : { *(.lockprofile.data) } :text
-  __lock_profile_end = .;
+       . = ALIGN(POINTER_ALIGN);
+       __lock_profile_start = .;
+       *(.lockprofile.data)
+       __lock_profile_end = .;
 #endif
+  } :text
 
+  . = ALIGN(MB(2));
+  __2M_rodata_end = .;
+
+  __2M_init_start = .;         /* Start of 2M superpages, mapped RWX (boot only). */
   . = ALIGN(PAGE_SIZE);             /* Init code and data */
   __init_begin = .;
   .init.text : {
@@ -119,6 +100,7 @@ SECTIONS
   } :text
   .init.data : {
        *(.init.rodata)
+       *(.init.rodata.rel)
        *(.init.rodata.str*)
        *(.init.data)
        *(.init.data.rel)
@@ -163,14 +145,49 @@ SECTIONS
        *(.xsm_initcall.init)
        __xsm_initcall_end = .;
   } :text
-  . = ALIGN(STACK_SIZE);
+  . = ALIGN(PAGE_SIZE);
   __init_end = .;
 
+  . = ALIGN(MB(2));
+  __2M_init_end = .;
+
+  __2M_rwdata_start = .;       /* Start of 2M superpages, mapped RW. */
+  . = ALIGN(SMP_CACHE_BYTES);
+  .data.read_mostly : {
+       /* Exception table */
+       __start___ex_table = .;
+       *(.ex_table)
+       __stop___ex_table = .;
+
+       /* Pre-exception table */
+       __start___pre_ex_table = .;
+       *(.ex_table.pre)
+       __stop___pre_ex_table = .;
+
+       *(.data.read_mostly)
+       . = ALIGN(8);
+       __start_schedulers_array = .;
+       *(.data.schedulers)
+       __end_schedulers_array = .;
+       *(.data.rel.ro)
+       *(.data.rel.ro.*)
+  } :text
+
+  .data : {                    /* Data */
+       . = ALIGN(PAGE_SIZE);
+       *(.data.page_aligned)
+       *(.data)
+       *(.data.rel)
+       *(.data.rel.*)
+       CONSTRUCTORS
+  } :text
+
   .bss : {                     /* BSS */
+       . = ALIGN(STACK_SIZE);
        __bss_start = .;
        *(.bss.stack_aligned)
        . = ALIGN(PAGE_SIZE);
-       *(.bss.page_aligned)
+       *(.bss.page_aligned*)
        *(.bss)
        . = ALIGN(SMP_CACHE_BYTES);
        __per_cpu_start = .;
@@ -182,6 +199,9 @@ SECTIONS
        __bss_end = .;
   } :text
   _end = . ;
+
+  . = ALIGN(MB(2));
+  __2M_rwdata_end = .;
 
 #ifdef EFI
   . = ALIGN(4);
@@ -229,4 +249,16 @@ ASSERT(__image_base__ > XEN_VIRT_START ||
 ASSERT(kexec_reloc_size - kexec_reloc <= PAGE_SIZE, "kexec_reloc is too large")
 #endif
 
-ASSERT((cpu0_stack & (STACK_SIZE - 1)) == 0, "cpu0_stack misaligned")
+ASSERT(IS_ALIGNED(__2M_text_start,   MB(2)), "__2M_text_start misaligned")
+ASSERT(IS_ALIGNED(__2M_text_end,     MB(2)), "__2M_text_end misaligned")
+ASSERT(IS_ALIGNED(__2M_rodata_start, MB(2)), "__2M_rodata_start misaligned")
+ASSERT(IS_ALIGNED(__2M_rodata_end,   MB(2)), "__2M_rodata_end misaligned")
+ASSERT(IS_ALIGNED(__2M_init_start,   MB(2)), "__2M_init_start misaligned")
+ASSERT(IS_ALIGNED(__2M_init_end,     MB(2)), "__2M_init_end misaligned")
+ASSERT(IS_ALIGNED(__2M_rwdata_start, MB(2)), "__2M_rwdata_start misaligned")
+ASSERT(IS_ALIGNED(__2M_rwdata_end,   MB(2)), "__2M_rwdata_end misaligned")
+
+ASSERT(IS_ALIGNED(cpu0_stack, STACK_SIZE), "cpu0_stack misaligned")
+
+ASSERT(IS_ALIGNED(__init_begin, PAGE_SIZE), "__init_begin misaligned")
+ASSERT(IS_ALIGNED(__init_end,   PAGE_SIZE), "__init_end misaligned")

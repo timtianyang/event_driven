@@ -184,28 +184,25 @@ qemu-xen-traditional-dir-force-update: qemu-xen-traditional-dir-find
 		$(GIT) reset --hard $(QEMU_TRADITIONAL_REVISION); \
 	fi
 
-subdir-all-qemu-xen-traditional-dir: qemu-xen-traditional-dir-find
+qemu-traditional-recurse = \
 	set -e; \
 		$(buildmakevars2shellvars); \
 		export CONFIG_BLKTAP1=n; \
 		cd qemu-xen-traditional-dir; \
-		$(QEMU_ROOT)/xen-setup \
-		$(IOEMU_EXTRA_LDFLAGS) \
-		--cpu=$(IOEMU_CPU_ARCH) \
-		$(IOEMU_CONFIGURE_CROSS); \
-		$(MAKE) all
+		$(1)
 
-subdir-install-qemu-xen-traditional-dir: qemu-xen-traditional-dir-find
-	set -e; \
-		$(buildmakevars2shellvars); \
-		export CONFIG_BLKTAP1=n; \
-		cd qemu-xen-traditional-dir; \
+subdir-all-qemu-xen-traditional-dir: qemu-xen-traditional-dir-find
+	$(call qemu-traditional-recurse,\
 		$(QEMU_ROOT)/xen-setup \
-		--extra-cflags="$(EXTRA_CFLAGS_QEMU_TRADITIONAL)" \
+		--extra-cflags="-D__XEN_TOOLS__ $(EXTRA_CFLAGS_QEMU_TRADITIONAL)" \
 		$(IOEMU_EXTRA_LDFLAGS) \
 		--cpu=$(IOEMU_CPU_ARCH) \
 		$(IOEMU_CONFIGURE_CROSS); \
-		$(MAKE) install
+		$(MAKE) all \
+	)
+
+subdir-install-qemu-xen-traditional-dir: subdir-all-qemu-xen-traditional-dir
+	$(call qemu-traditional-recurse,$(MAKE) install)
 
 subdir-clean-qemu-xen-traditional-dir:
 	set -e; if test -d qemu-xen-traditional-dir/.; then \
@@ -231,7 +228,7 @@ qemu-xen-dir-force-update: qemu-xen-dir-find
 	fi
 
 ifeq ($(debug),y)
-QEMU_XEN_ENABLE_DEBUG := --enable-debug --enable-trace-backend=stderr
+QEMU_XEN_ENABLE_DEBUG := --enable-debug
 else
 QEMU_XEN_ENABLE_DEBUG :=
 endif
@@ -243,8 +240,14 @@ subdir-all-qemu-xen-dir: qemu-xen-dir-find
 		source=.; \
 	fi; \
 	cd qemu-xen-dir; \
+	if $$source/scripts/tracetool.py --check-backend --backend stderr ; then \
+		enable_trace_backend='--enable-trace-backend=stderr'; \
+	else \
+		enable_trace_backend='' ; \
+	fi ; \
 	$$source/configure --enable-xen --target-list=i386-softmmu \
 		$(QEMU_XEN_ENABLE_DEBUG) \
+		$$enable_trace_backend \
 		--prefix=$(LIBEXEC) \
 		--libdir=$(LIBEXEC_LIB) \
 		--includedir=$(LIBEXEC_INC) \

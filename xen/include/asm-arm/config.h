@@ -7,12 +7,6 @@
 #ifndef __ARM_CONFIG_H__
 #define __ARM_CONFIG_H__
 
-#if defined(__aarch64__)
-# define CONFIG_ARM_64 1
-#elif defined(__arm__)
-# define CONFIG_ARM_32 1
-#endif
-
 #if defined(CONFIG_ARM_64)
 # define LONG_BYTEORDER 3
 #else
@@ -21,9 +15,13 @@
 
 #define BYTES_PER_LONG (1 << LONG_BYTEORDER)
 #define BITS_PER_LONG (BYTES_PER_LONG << 3)
+#define POINTER_ALIGN BYTES_PER_LONG
 
 /* xen_ulong_t is always 64 bits */
 #define BITS_PER_XEN_ULONG 64
+
+/* And ELF files are also 64-bit. */
+#define ELFSIZE 64
 
 #define CONFIG_PAGING_ASSISTANCE 1
 
@@ -34,8 +32,6 @@
 #define CONFIG_ARM_L1_CACHE_SHIFT 7 /* XXX */
 
 #define CONFIG_SMP 1
-
-#define CONFIG_VIDEO 1
 
 #define CONFIG_IRQ_HAS_MULTIPLE_ACTION 1
 

@@ -26,6 +26,7 @@
 #include <xen/vm_event.h>
 #include <xen/mem_access.h>
 #include <asm/p2m.h>
+#include <asm/altp2m.h>
 #include <asm/vm_event.h>
 #include <xsm/xsm.h>
 
@@ -567,7 +568,7 @@ int vm_event_domctl(struct domain *d, xen_domctl_vm_event_op_t *vec,
     if ( rc )
         return rc;
 
-    if ( unlikely(d == current->domain) )
+    if ( unlikely(d == current->domain) ) /* no domain_pause() */
     {
         gdprintk(XENLOG_INFO, "Tried to do a memory event op on itself.\n");
         return -EINVAL;
@@ -624,6 +625,7 @@ int vm_event_domctl(struct domain *d, xen_domctl_vm_event_op_t *vec,
             if ( p2m->pod.entry_count )
                 break;
 
+            /* domain_pause() not required here, see XSA-99 */
             rc = vm_event_enable(d, vec, ved, _VPF_mem_paging,
                                  HVM_PARAM_PAGING_RING_PFN,
                                  mem_paging_notification);
@@ -632,7 +634,11 @@ int vm_event_domctl(struct domain *d, xen_domctl_vm_event_op_t *vec,
 
         case XEN_VM_EVENT_DISABLE:
             if ( ved->ring_page )
+            {
+                domain_pause(d);
                 rc = vm_event_disable(d, ved);
+                domain_unpause(d);
+            }
             break;
 
         case XEN_VM_EVENT_RESUME:
@@ -658,6 +664,7 @@ int vm_event_domctl(struct domain *d, xen_domctl_vm_event_op_t *vec,
         switch( vec->op )
         {
         case XEN_VM_EVENT_ENABLE:
+            /* domain_pause() not required here, see XSA-99 */
             rc = vm_event_enable(d, vec, ved, _VPF_mem_access,
                                  HVM_PARAM_MONITOR_RING_PFN,
                                  monitor_notification);
@@ -665,7 +672,11 @@ int vm_event_domctl(struct domain *d, xen_domctl_vm_event_op_t *vec,
 
         case XEN_VM_EVENT_DISABLE:
             if ( ved->ring_page )
+            {
+                domain_pause(d);
                 rc = vm_event_disable(d, ved);
+                domain_unpause(d);
+            }
             break;
 
         case XEN_VM_EVENT_RESUME:
@@ -701,6 +712,7 @@ int vm_event_domctl(struct domain *d, xen_domctl_vm_event_op_t *vec,
             if ( !hap_enabled(d) )
                 break;
 
+            /* domain_pause() not required here, see XSA-99 */
             rc = vm_event_enable(d, vec, ved, _VPF_mem_sharing,
                                  HVM_PARAM_SHARING_RING_PFN,
                                  mem_sharing_notification);
@@ -708,7 +720,11 @@ int vm_event_domctl(struct domain *d, xen_domctl_vm_event_op_t *vec,
 
         case XEN_VM_EVENT_DISABLE:
             if ( ved->ring_page )
+            {
+                domain_pause(d);
                 rc = vm_event_disable(d, ved);
+                domain_unpause(d);
+            }
             break;
 
         case XEN_VM_EVENT_RESUME:
@@ -763,6 +779,65 @@ void vm_event_vcpu_unpause(struct vcpu *v)
     } while ( prev != old );
 
     vcpu_unpause(v);
+}
+
+/*
+ * Monitor vm-events
+ */
+
+int vm_event_monitor_traps(struct vcpu *v, uint8_t sync,
+                           vm_event_request_t *req)
+{
+    int rc;
+    struct domain *d = v->domain;
+
+    rc = vm_event_claim_slot(d, &d->vm_event->monitor);
+    switch ( rc )
+    {
+    case 0:
+        break;
+    case -ENOSYS:
+        /*
+         * If there was no ring to handle the event, then
+         * simply continue executing normally.
+         */
+        return 1;
+    default:
+        return rc;
+    };
+
+    if ( sync )
+    {
+        req->flags |= VM_EVENT_FLAG_VCPU_PAUSED;
+        vm_event_vcpu_pause(v);
+    }
+
+    if ( altp2m_active(d) )
+    {
+        req->flags |= VM_EVENT_FLAG_ALTERNATE_P2M;
+        req->altp2m_idx = altp2m_vcpu_idx(v);
+    }
+
+    vm_event_fill_regs(req);
+    vm_event_put_request(d, &d->vm_event->monitor, req);
+
+    return 1;
+}
+
+void vm_event_monitor_guest_request(void)
+{
+    struct vcpu *curr = current;
+    struct domain *d = curr->domain;
+
+    if ( d->monitor.guest_request_enabled )
+    {
+        vm_event_request_t req = {
+            .reason = VM_EVENT_REASON_GUEST_REQUEST,
+            .vcpu_id = curr->vcpu_id,
+        };
+
+        vm_event_monitor_traps(curr, d->monitor.guest_request_sync, &req);
+    }
 }
 
 /*

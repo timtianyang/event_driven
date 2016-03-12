@@ -81,6 +81,7 @@ _uninstall: D=$(DESTDIR)
 _uninstall: T=$(notdir $(TARGET))
 _uninstall: Z=$(CONFIG_XEN_INSTALL_SUFFIX)
 _uninstall:
+	rm -f $(D)$(BOOT_DIR)/$(T)-$(XEN_FULLVERSION).config
 	rm -f $(D)$(BOOT_DIR)/$(T)-$(XEN_FULLVERSION)$(Z)
 	rm -f $(D)$(BOOT_DIR)/$(T)-$(XEN_VERSION).$(XEN_SUBVERSION)$(Z)
 	rm -f $(D)$(BOOT_DIR)/$(T)-$(XEN_VERSION)$(Z)
@@ -190,7 +191,7 @@ endef
 define set_exuberant_flags
     exuberant_flags=`$1 --version 2>/dev/null | (grep -iq exuberant && \
 	echo "-I __initdata,__exitdata,__acquires,__releases \
-	    -I EXPORT_SYMBOL,EXPORT_SYMBOL_GPL \
+	    -I EXPORT_SYMBOL \
 	    --extra=+f --c-kinds=+px") || true` 
 endef
 
@@ -237,7 +238,8 @@ FORCE:
 	$(MAKE) -f $(BASEDIR)/Rules.mk -C $* built_in.o built_in_bin.o
 
 kconfig := silentoldconfig oldconfig config menuconfig defconfig \
-	nconfig xconfig gconfig savedefconfig listnewconfig olddefconfig
+	nconfig xconfig gconfig savedefconfig listnewconfig olddefconfig \
+	randconfig
 .PHONY: $(kconfig)
 $(kconfig):
 	$(MAKE) -f $(BASEDIR)/tools/kconfig/Makefile.kconfig ARCH=$(ARCH) SRCARCH=$(SRCARCH) $@

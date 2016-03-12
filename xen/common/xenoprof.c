@@ -50,16 +50,16 @@ static u64 passive_samples;
 static u64 idle_samples;
 static u64 others_samples;
 
-int acquire_pmu_ownership(int pmu_ownship)
+int acquire_pmu_ownership(int pmu_ownership)
 {
     spin_lock(&pmu_owner_lock);
     if ( pmu_owner == PMU_OWNER_NONE )
     {
-        pmu_owner = pmu_ownship;
+        pmu_owner = pmu_ownership;
         goto out;
     }
 
-    if ( pmu_owner == pmu_ownship )
+    if ( pmu_owner == pmu_ownership )
         goto out;
 
     spin_unlock(&pmu_owner_lock);
@@ -71,10 +71,10 @@ int acquire_pmu_ownership(int pmu_ownship)
     return 1;
 }
 
-void release_pmu_ownship(int pmu_ownship)
+void release_pmu_ownership(int pmu_ownership)
 {
     spin_lock(&pmu_owner_lock);
-    if ( pmu_ownship == PMU_OWNER_HVM )
+    if ( pmu_ownership == PMU_OWNER_HVM )
         pmu_hvm_refcount--;
     if ( !pmu_hvm_refcount )
         pmu_owner = PMU_OWNER_NONE;
@@ -177,11 +177,14 @@ xenoprof_shared_gmfn_with_guest(
     struct domain *d, unsigned long maddr, unsigned long gmaddr, int npages)
 {
     int i;
-    
+
     for ( i = 0; i < npages; i++, maddr += PAGE_SIZE, gmaddr += PAGE_SIZE )
     {
         BUG_ON(page_get_owner(maddr_to_page(maddr)) != d);
-        xenoprof_shared_gmfn(d, gmaddr, maddr);
+        if ( i == 0 )
+            gdprintk(XENLOG_WARNING,
+                     "xenoprof unsupported with autotranslated guests\n");
+
     }
 }
 
@@ -847,7 +850,7 @@ ret_t do_xenoprof_op(int op, XEN_GUEST_HANDLE_PARAM(void) arg)
             break;
         x = current->domain->xenoprof;
         unshare_xenoprof_page_with_guest(x);
-        release_pmu_ownship(PMU_OWNER_XENOPROF);
+        release_pmu_ownership(PMU_OWNER_XENOPROF);
         break;
     }
 

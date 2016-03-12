@@ -226,43 +226,17 @@ static struct uart_driver __read_mostly pl011_driver = {
     .vuart_info   = pl011_vuart,
 };
 
-/* TODO: Parse UART config from the command line */
-static int __init pl011_uart_init(struct dt_device_node *dev,
-                                  const void *data)
+static int __init pl011_uart_init(int irq, u64 addr, u64 size)
 {
-    const char *config = data;
     struct pl011 *uart;
-    int res;
-    u64 addr, size;
-
-    if ( strcmp(config, "") )
-    {
-        printk("WARNING: UART configuration is not supported\n");
-    }
 
     uart = &pl011_com;
-
+    uart->irq       = irq;
     uart->clock_hz  = 0x16e3600;
     uart->baud      = BAUD_AUTO;
     uart->data_bits = 8;
     uart->parity    = PARITY_NONE;
     uart->stop_bits = 1;
-
-    res = dt_device_get_address(dev, 0, &addr, &size);
-    if ( res )
-    {
-        printk("pl011: Unable to retrieve the base"
-               " address of the UART\n");
-        return res;
-    }
-
-    res = platform_get_irq(dev, 0);
-    if ( res < 0 )
-    {
-        printk("pl011: Unable to retrieve the IRQ\n");
-        return -EINVAL;
-    }
-    uart->irq = res;
 
     uart->regs = ioremap_nocache(addr, size);
     if ( !uart->regs )
@@ -280,6 +254,44 @@ static int __init pl011_uart_init(struct dt_device_node *dev,
     /* Register with generic serial driver. */
     serial_register_uart(SERHND_DTUART, &pl011_driver, uart);
 
+    return 0;
+}
+
+/* TODO: Parse UART config from the command line */
+static int __init pl011_dt_uart_init(struct dt_device_node *dev,
+                                     const void *data)
+{
+    const char *config = data;
+    int res;
+    u64 addr, size;
+
+    if ( strcmp(config, "") )
+    {
+        printk("WARNING: UART configuration is not supported\n");
+    }
+
+    res = dt_device_get_address(dev, 0, &addr, &size);
+    if ( res )
+    {
+        printk("pl011: Unable to retrieve the base"
+               " address of the UART\n");
+        return res;
+    }
+
+    res = platform_get_irq(dev, 0);
+    if ( res < 0 )
+    {
+        printk("pl011: Unable to retrieve the IRQ\n");
+        return -EINVAL;
+    }
+
+    res = pl011_uart_init(res, addr, size);
+    if ( res < 0 )
+    {
+        printk("pl011: Unable to initialize\n");
+        return res;
+    }
+
     dt_device_set_used_by(dev, DOMID_XEN);
 
     return 0;
@@ -293,8 +305,46 @@ static const struct dt_device_match pl011_dt_match[] __initconst =
 
 DT_DEVICE_START(pl011, "PL011 UART", DEVICE_SERIAL)
         .dt_match = pl011_dt_match,
-        .init = pl011_uart_init,
+        .init = pl011_dt_uart_init,
 DT_DEVICE_END
+
+#ifdef CONFIG_ACPI
+#include <xen/acpi.h>
+
+static int __init pl011_acpi_uart_init(const void *data)
+{
+    acpi_status status;
+    struct acpi_table_spcr *spcr = NULL;
+    int res;
+
+    status = acpi_get_table(ACPI_SIG_SPCR, 0,
+                            (struct acpi_table_header **)&spcr);
+
+    if ( ACPI_FAILURE(status) )
+    {
+        printk("pl011: Failed to get SPCR table\n");
+        return -EINVAL;
+    }
+
+    /* trigger/polarity information is not available in spcr */
+    irq_set_type(spcr->interrupt, IRQ_TYPE_EDGE_BOTH);
+
+    res = pl011_uart_init(spcr->interrupt, spcr->serial_port.address,
+                          PAGE_SIZE);
+    if ( res < 0 )
+    {
+        printk("pl011: Unable to initialize\n");
+        return res;
+    }
+
+    return 0;
+}
+
+ACPI_DEVICE_START(apl011, "PL011 UART", DEVICE_SERIAL)
+        .class_type = ACPI_DBG2_PL011,
+        .init = pl011_acpi_uart_init,
+ACPI_DEVICE_END
+#endif
 
 /*
  * Local variables:

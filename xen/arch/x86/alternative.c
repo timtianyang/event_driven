@@ -38,7 +38,7 @@ static const unsigned char k8nops[] __initconst = {
     K8_NOP7,
     K8_NOP8
 };
-static const unsigned char * const k8_nops[ASM_NOP_MAX+1] = {
+static const unsigned char * const k8_nops[ASM_NOP_MAX+1] __initconstrel = {
     NULL,
     k8nops,
     k8nops + 1,
@@ -62,7 +62,7 @@ static const unsigned char p6nops[] __initconst = {
     P6_NOP7,
     P6_NOP8
 };
-static const unsigned char * const p6_nops[ASM_NOP_MAX+1] = {
+static const unsigned char * const p6_nops[ASM_NOP_MAX+1] __initconstrel = {
     NULL,
     p6nops,
     p6nops + 1,
@@ -147,10 +147,14 @@ static void __init apply_alternatives(struct alt_instr *start, struct alt_instr 
     struct alt_instr *a;
     u8 *instr, *replacement;
     u8 insnbuf[MAX_PATCH_LEN];
+    unsigned long cr0 = read_cr0();
 
     ASSERT(!local_irq_is_enabled());
 
     printk(KERN_INFO "alt table %p -> %p\n", start, end);
+
+    /* Disable WP to allow application of alternatives to read-only pages. */
+    write_cr0(cr0 & ~X86_CR0_WP);
 
     /*
      * The scan order should be from start to end. A later scanned
@@ -181,6 +185,9 @@ static void __init apply_alternatives(struct alt_instr *start, struct alt_instr 
                  a->instrlen - a->replacementlen);
         text_poke_early(instr, insnbuf, a->instrlen);
     }
+
+    /* Reinstate WP. */
+    write_cr0(cr0);
 }
 
 void __init alternative_instructions(void)

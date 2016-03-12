@@ -357,9 +357,6 @@ static void svm_save_cpu_state(struct vcpu *v, struct hvm_hw_cpu *data)
     data->msr_syscall_mask = vmcb->sfmask;
     data->msr_efer         = v->arch.hvm_vcpu.guest_efer;
     data->msr_flags        = -1ULL;
-
-    data->tsc = hvm_get_guest_tsc_fixed(v,
-                                        v->domain->arch.hvm_domain.sync_tsc);
 }
 
 
@@ -374,8 +371,6 @@ static void svm_load_cpu_state(struct vcpu *v, struct hvm_hw_cpu *data)
     vmcb->sfmask     = data->msr_syscall_mask;
     v->arch.hvm_vcpu.guest_efer = data->msr_efer;
     svm_update_guest_efer(v);
-
-    hvm_set_guest_tsc_fixed(v, data->tsc, v->domain->arch.hvm_domain.sync_tsc);
 }
 
 static void svm_save_vmcb_ctxt(struct vcpu *v, struct hvm_hw_cpu *ctxt)
@@ -597,6 +592,21 @@ static void svm_update_guest_efer(struct vcpu *v)
     vmcb_set_efer(vmcb, new_efer);
 }
 
+static void svm_update_guest_vendor(struct vcpu *v)
+{
+    struct arch_svm_struct *arch_svm = &v->arch.hvm_svm;
+    struct vmcb_struct *vmcb = arch_svm->vmcb;
+    u32 bitmap = vmcb_get_exception_intercepts(vmcb);
+
+    if ( opt_hvm_fep ||
+         (v->domain->arch.x86_vendor != boot_cpu_data.x86_vendor) )
+        bitmap |= (1U << TRAP_invalid_op);
+    else
+        bitmap &= ~(1U << TRAP_invalid_op);
+
+    vmcb_set_exception_intercepts(vmcb, bitmap);
+}
+
 static void svm_sync_vmcb(struct vcpu *v)
 {
     struct arch_svm_struct *arch_svm = &v->arch.hvm_svm;
@@ -804,13 +814,6 @@ static uint64_t scale_tsc(uint64_t host_tsc, uint64_t ratio)
     return scaled_host_tsc;
 }
 
-static uint64_t svm_scale_tsc(const struct vcpu *v, uint64_t tsc)
-{
-    ASSERT(cpu_has_tsc_ratio && !v->domain->arch.vtsc);
-
-    return scale_tsc(tsc, vcpu_tsc_ratio(v));
-}
-
 static uint64_t svm_get_tsc_offset(uint64_t host_tsc, uint64_t guest_tsc,
     uint64_t ratio)
 {
@@ -985,7 +988,7 @@ static inline void svm_tsc_ratio_save(struct vcpu *v)
 static inline void svm_tsc_ratio_load(struct vcpu *v)
 {
     if ( cpu_has_tsc_ratio && !v->domain->arch.vtsc ) 
-        wrmsrl(MSR_AMD64_TSC_RATIO, vcpu_tsc_ratio(v));
+        wrmsrl(MSR_AMD64_TSC_RATIO, hvm_tsc_scaling_ratio(v->domain));
 }
 
 static void svm_ctxt_switch_from(struct vcpu *v)
@@ -1449,6 +1452,9 @@ const struct hvm_function_table * __init start_svm(void)
     /* DecodeAssists fast paths assume nextrip is valid for fast rIP update. */
     if ( !cpu_has_svm_nrips )
         clear_bit(SVM_FEATURE_DECODEASSISTS, &svm_feature_flags);
+
+    if ( cpu_has_tsc_ratio )
+        svm_function_table.tsc_scaling.ratio_frac_bits = 32;
 
 #define P(p,s) if ( p ) { printk(" - %s\n", s); printed = 1; }
     P(cpu_has_svm_npt, "Nested Page Tables (NPT)");
@@ -2245,6 +2251,7 @@ static struct hvm_function_table __initdata svm_function_table = {
     .get_shadow_gs_base   = svm_get_shadow_gs_base,
     .update_guest_cr      = svm_update_guest_cr,
     .update_guest_efer    = svm_update_guest_efer,
+    .update_guest_vendor  = svm_update_guest_vendor,
     .set_guest_pat        = svm_set_guest_pat,
     .get_guest_pat        = svm_get_guest_pat,
     .set_tsc_offset       = svm_set_tsc_offset,
@@ -2270,7 +2277,9 @@ static struct hvm_function_table __initdata svm_function_table = {
     .nhvm_intr_blocked = nsvm_intr_blocked,
     .nhvm_hap_walk_L1_p2m = nsvm_hap_walk_L1_p2m,
 
-    .scale_tsc            = svm_scale_tsc,
+    .tsc_scaling = {
+        .max_ratio = ~TSC_RATIO_RSVD_BITS,
+    },
 };
 
 void svm_vmexit_handler(struct cpu_user_regs *regs)

@@ -157,7 +157,7 @@ hvm_read(enum x86_segment seg,
 
     rc = hvm_translate_linear_addr(
         seg, offset, bytes, access_type, sh_ctxt, &addr);
-    if ( rc )
+    if ( rc || !bytes )
         return rc;
 
     if ( access_type == hvm_access_insn_fetch )
@@ -241,7 +241,7 @@ hvm_emulate_write(enum x86_segment seg,
 
     rc = hvm_translate_linear_addr(
         seg, offset, bytes, hvm_access_write, sh_ctxt, &addr);
-    if ( rc )
+    if ( rc || !bytes )
         return rc;
 
     return v->arch.paging.mode->shadow.x86_emulate_write(
@@ -259,10 +259,10 @@ hvm_emulate_cmpxchg(enum x86_segment seg,
     struct sh_emulate_ctxt *sh_ctxt =
         container_of(ctxt, struct sh_emulate_ctxt, ctxt);
     struct vcpu *v = current;
-    unsigned long addr, old[2], new[2];
+    unsigned long addr, old, new;
     int rc;
 
-    if ( !is_x86_user_segment(seg) )
+    if ( !is_x86_user_segment(seg) || bytes > sizeof(long) )
         return X86EMUL_UNHANDLEABLE;
 
     rc = hvm_translate_linear_addr(
@@ -270,15 +270,12 @@ hvm_emulate_cmpxchg(enum x86_segment seg,
     if ( rc )
         return rc;
 
-    old[0] = new[0] = 0;
-    memcpy(old, p_old, bytes);
-    memcpy(new, p_new, bytes);
+    old = new = 0;
+    memcpy(&old, p_old, bytes);
+    memcpy(&new, p_new, bytes);
 
-    if ( bytes <= sizeof(long) )
-        return v->arch.paging.mode->shadow.x86_emulate_cmpxchg(
-            v, addr, old[0], new[0], bytes, sh_ctxt);
-
-    return X86EMUL_UNHANDLEABLE;
+    return v->arch.paging.mode->shadow.x86_emulate_cmpxchg(
+               v, addr, old, new, bytes, sh_ctxt);
 }
 
 static const struct x86_emulate_ops hvm_shadow_emulator_ops = {
@@ -335,21 +332,18 @@ pv_emulate_cmpxchg(enum x86_segment seg,
 {
     struct sh_emulate_ctxt *sh_ctxt =
         container_of(ctxt, struct sh_emulate_ctxt, ctxt);
-    unsigned long old[2], new[2];
+    unsigned long old, new;
     struct vcpu *v = current;
 
-    if ( !is_x86_user_segment(seg) )
+    if ( !is_x86_user_segment(seg) || bytes > sizeof(long) )
         return X86EMUL_UNHANDLEABLE;
 
-    old[0] = new[0] = 0;
-    memcpy(old, p_old, bytes);
-    memcpy(new, p_new, bytes);
+    old = new = 0;
+    memcpy(&old, p_old, bytes);
+    memcpy(&new, p_new, bytes);
 
-    if ( bytes <= sizeof(long) )
-        return v->arch.paging.mode->shadow.x86_emulate_cmpxchg(
-            v, offset, old[0], new[0], bytes, sh_ctxt);
-
-    return X86EMUL_UNHANDLEABLE;
+    return v->arch.paging.mode->shadow.x86_emulate_cmpxchg(
+               v, offset, old, new, bytes, sh_ctxt);
 }
 
 static const struct x86_emulate_ops pv_shadow_emulator_ops = {
@@ -2921,8 +2915,7 @@ int shadow_enable(struct domain *d, u32 mode)
 
     /* Sanity check the arguments */
     if ( shadow_mode_enabled(d) ||
-         ((mode & PG_translate) && !(mode & PG_refcounts)) ||
-         ((mode & PG_external) && !(mode & PG_translate)) )
+         ((mode & PG_translate) && !(mode & PG_refcounts)) )
     {
         rv = -EINVAL;
         goto out_unlocked;
@@ -3668,11 +3661,8 @@ int shadow_domctl(struct domain *d,
     case XEN_DOMCTL_SHADOW_OP_ENABLE_TEST:
         return shadow_test_enable(d);
 
-    case XEN_DOMCTL_SHADOW_OP_ENABLE_TRANSLATE:
-        return shadow_enable(d, PG_refcounts|PG_translate);
-
     case XEN_DOMCTL_SHADOW_OP_ENABLE:
-        return shadow_enable(d, sc->mode << PG_mode_shift);
+        return paging_enable(d, sc->mode << PG_mode_shift);
 
     case XEN_DOMCTL_SHADOW_OP_GET_ALLOCATION:
         sc->mb = shadow_get_allocation(d);

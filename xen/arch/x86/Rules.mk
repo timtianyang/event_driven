@@ -1,11 +1,7 @@
 ########################################
 # x86-specific definitions
 
-HAS_NUMA := y
-HAS_CORE_PARKING := y
-xenoprof := y
-
-CFLAGS += -I$(BASEDIR)/include 
+CFLAGS += -I$(BASEDIR)/include
 CFLAGS += -I$(BASEDIR)/include/asm-x86/mach-generic
 CFLAGS += -I$(BASEDIR)/include/asm-x86/mach-default
 CFLAGS += '-D__OBJECT_LABEL__=$(subst /,$$,$(subst -,_,$(subst $(BASEDIR)/,,$(CURDIR))/$@))'
@@ -22,13 +18,9 @@ $(call as-insn-check,CFLAGS,CC,".equ \"x\"$$(comma)1", \
                      -U__OBJECT_LABEL__ -DHAVE_GAS_QUOTED_SYM \
                      '-D__OBJECT_LABEL__=$(subst $(BASEDIR)/,,$(CURDIR))/$$@')
 
-shadow-paging ?= y
-
 CFLAGS += -mno-red-zone -mno-sse -fpic
 CFLAGS += -fno-asynchronous-unwind-tables
 # -fvisibility=hidden reduces -fpic cost, if it's available
 ifneq ($(call cc-option,$(CC),-fvisibility=hidden,n),n)
 CFLAGS += -DGCC_HAS_VISIBILITY_ATTRIBUTE
 endif
-
-CFLAGS-$(shadow-paging) += -DCONFIG_SHADOW_PAGING

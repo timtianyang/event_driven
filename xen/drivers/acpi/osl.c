@@ -38,6 +38,7 @@
 #include <xen/domain_page.h>
 #include <xen/efi.h>
 #include <xen/vmap.h>
+#include <xen/kconfig.h>
 
 #define _COMPONENT		ACPI_OS_SERVICES
 ACPI_MODULE_NAME("osl")
@@ -75,12 +76,14 @@ acpi_physical_address __init acpi_os_get_root_pointer(void)
 			       "System description tables not found\n");
 			return 0;
 		}
-	} else {
+	} else if (IS_ENABLED(CONFIG_ACPI_LEGACY_TABLES_LOOKUP)) {
 		acpi_physical_address pa = 0;
 
 		acpi_find_root_pointer(&pa);
 		return pa;
 	}
+
+	return 0;
 }
 
 void __iomem *
@@ -90,11 +93,11 @@ acpi_os_map_memory(acpi_physical_address phys, acpi_size size)
 		mfn_t mfn = _mfn(PFN_DOWN(phys));
 		unsigned int offs = phys & (PAGE_SIZE - 1);
 
-		/* The low first Mb is always mapped. */
-		if ( !((phys + size - 1) >> 20) )
+		/* The low first Mb is always mapped on x86. */
+		if (IS_ENABLED(CONFIG_X86) && !((phys + size - 1) >> 20))
 			return __va(phys);
 		return __vmap(&mfn, PFN_UP(offs + size), 1, 1,
-			      PAGE_HYPERVISOR_NOCACHE) + offs;
+			      ACPI_MAP_MEM_ATTR) + offs;
 	}
 	return __acpi_map_table(phys, size);
 }

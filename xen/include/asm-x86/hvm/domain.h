@@ -91,7 +91,7 @@ struct hvm_domain {
     /* Cached CF8 for guest PCI config cycles */
     uint32_t                pci_cf8;
 
-    struct pl_time         pl_time;
+    struct pl_time         *pl_time;
 
     struct hvm_io_handler *io_handler;
     unsigned int          io_handler_count;
@@ -142,6 +142,8 @@ struct hvm_domain {
      * Used during initialization and save/restore.
      */
     uint64_t sync_tsc;
+
+    uint64_t tsc_scaling_ratio;
 
     unsigned long *io_bitmap;
 

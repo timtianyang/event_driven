@@ -60,12 +60,12 @@ static unsigned int __initdata max_cpus;
 integer_param("maxcpus", max_cpus);
 
 /* smep: Enable/disable Supervisor Mode Execution Protection (default on). */
-static bool_t __initdata disable_smep;
-invbool_param("smep", disable_smep);
+static bool_t __initdata opt_smep = 1;
+boolean_param("smep", opt_smep);
 
 /* smap: Enable/disable Supervisor Mode Access Prevention (default on). */
-static bool_t __initdata disable_smap;
-invbool_param("smap", disable_smap);
+static bool_t __initdata opt_smap = 1;
+boolean_param("smap", opt_smap);
 
 /* Boot dom0 in pvh mode */
 static bool_t __initdata opt_dom0pvh;
@@ -174,16 +174,6 @@ void __init discard_initial_images(void)
 
     nr_initial_images = 0;
     initial_images = NULL;
-}
-
-static void free_xen_data(char *s, char *e)
-{
-#ifndef MEMORY_GUARD
-    init_xenheap_pages(__pa(s), __pa(e));
-#endif
-    memguard_guard_range(s, e-s);
-    /* Also zap the mapping in the 1:1 area. */
-    memguard_guard_range(__va(__pa(s)), e-s);
 }
 
 extern char __init_begin[], __init_end[], __bss_start[], __bss_end[];
@@ -509,13 +499,21 @@ static void __init kexec_reserve_area(struct e820map *e820)
 
 static void noinline init_done(void)
 {
+    void *va;
+
     system_state = SYS_STATE_active;
 
     domain_unpause_by_systemcontroller(hardware_domain);
 
-    /* Free (or page-protect) the init areas. */
-    memset(__init_begin, 0xcc, __init_end - __init_begin); /* int3 poison */
-    free_xen_data(__init_begin, __init_end);
+    /* Zero the .init code and data. */
+    for ( va = __init_begin; va < _p(__init_end); va += PAGE_SIZE )
+        clear_page(va);
+
+    /* Destroy Xen's mappings, and reuse the pages. */
+    destroy_xen_mappings((unsigned long)&__2M_init_start,
+                         (unsigned long)&__2M_init_end);
+    init_xenheap_pages(__pa(__2M_init_start), __pa(__2M_init_end));
+
     printk("Freed %ldkB init memory.\n", (long)(__init_end-__init_begin)>>10);
 
     startup_cpu_idle_loop();
@@ -920,14 +918,46 @@ void __init noreturn __start_xen(unsigned long mbi_p)
 
             /* The only data mappings to be relocated are in the Xen area. */
             pl2e = __va(__pa(l2_xenmap));
+            /*
+             * Undo the temporary-hooking of the l1_identmap.  __2M_text_start
+             * is contained in this PTE.
+             */
             *pl2e++ = l2e_from_pfn(xen_phys_start >> PAGE_SHIFT,
-                                   PAGE_HYPERVISOR_RWX | _PAGE_PSE);
+                                   PAGE_HYPERVISOR_RX | _PAGE_PSE);
             for ( i = 1; i < L2_PAGETABLE_ENTRIES; i++, pl2e++ )
             {
+                unsigned int flags;
+
                 if ( !(l2e_get_flags(*pl2e) & _PAGE_PRESENT) )
                     continue;
-                *pl2e = l2e_from_intpte(l2e_get_intpte(*pl2e) +
-                                        xen_phys_start);
+
+                if ( i < l2_table_offset((unsigned long)&__2M_text_end) )
+                {
+                    flags = PAGE_HYPERVISOR_RX | _PAGE_PSE;
+                }
+                else if ( i >= l2_table_offset((unsigned long)&__2M_rodata_start) &&
+                          i <  l2_table_offset((unsigned long)&__2M_rodata_end) )
+                {
+                    flags = PAGE_HYPERVISOR_RO | _PAGE_PSE;
+                }
+                else if ( i >= l2_table_offset((unsigned long)&__2M_init_start) &&
+                          i <  l2_table_offset((unsigned long)&__2M_init_end) )
+                {
+                    flags = PAGE_HYPERVISOR_RWX | _PAGE_PSE;
+                }
+                else if ( (i >= l2_table_offset((unsigned long)&__2M_rwdata_start) &&
+                           i <  l2_table_offset((unsigned long)&__2M_rwdata_end)) )
+                {
+                    flags = PAGE_HYPERVISOR_RW | _PAGE_PSE;
+                }
+                else
+                {
+                    *pl2e = l2e_empty();
+                    continue;
+                }
+
+                *pl2e = l2e_from_paddr(
+                    l2e_get_paddr(*pl2e) + xen_phys_start, flags);
             }
 
             /* Re-sync the stack and then switch to relocated pagetables. */
@@ -1146,8 +1176,6 @@ void __init noreturn __start_xen(unsigned long mbi_p)
                    ~((1UL << L2_PAGETABLE_SHIFT) - 1);
     destroy_xen_mappings(xen_virt_end, XEN_VIRT_START + BOOTSTRAP_MAP_BASE);
 
-    memguard_init();
-
     nr_pages = 0;
     for ( i = 0; i < e820.nr_map; i++ )
         if ( e820.map[i].type == E820_RAM )
@@ -1297,12 +1325,12 @@ void __init noreturn __start_xen(unsigned long mbi_p)
 
     set_in_cr4(X86_CR4_OSFXSR | X86_CR4_OSXMMEXCPT);
 
-    if ( disable_smep )
+    if ( !opt_smep )
         setup_clear_cpu_cap(X86_FEATURE_SMEP);
     if ( cpu_has_smep )
         set_in_cr4(X86_CR4_SMEP);
 
-    if ( disable_smap )
+    if ( !opt_smap )
         setup_clear_cpu_cap(X86_FEATURE_SMAP);
     if ( cpu_has_smap )
         set_in_cr4(X86_CR4_SMAP);

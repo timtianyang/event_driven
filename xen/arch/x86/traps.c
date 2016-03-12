@@ -114,6 +114,74 @@ boolean_param("ler", opt_ler);
 #define stack_words_per_line 4
 #define ESP_BEFORE_EXCEPTION(regs) ((unsigned long *)regs->rsp)
 
+static void show_code(const struct cpu_user_regs *regs)
+{
+    unsigned char insns_before[8] = {}, insns_after[16] = {};
+    unsigned int i, tmp, missing_before, missing_after;
+
+    if ( guest_mode(regs) )
+        return;
+
+    stac();
+
+    /*
+     * Copy forward from regs->rip.  In the case of a fault, %ecx contains the
+     * number of bytes remaining to copy.
+     */
+    asm volatile ("1: rep movsb; 2:"
+                  _ASM_EXTABLE(1b, 2b)
+                  : "=&c" (missing_after),
+                    "=&D" (tmp), "=&S" (tmp)
+                  : "0" (ARRAY_SIZE(insns_after)),
+                    "1" (insns_after),
+                    "2" (regs->rip));
+
+    /*
+     * Copy backwards from regs->rip - 1.  In the case of a fault, %ecx
+     * contains the number of bytes remaining to copy.
+     */
+    asm volatile ("std;"
+                  "1: rep movsb;"
+                  "2: cld;"
+                  _ASM_EXTABLE(1b, 2b)
+                  : "=&c" (missing_before),
+                    "=&D" (tmp), "=&S" (tmp)
+                  : "0" (ARRAY_SIZE(insns_before)),
+                    "1" (insns_before + ARRAY_SIZE(insns_before)),
+                    "2" (regs->rip - 1));
+    clac();
+
+    printk("Xen code around <%p> (%ps)%s:\n",
+           _p(regs->rip), _p(regs->rip),
+           (missing_before || missing_after) ? " [fault on access]" : "");
+
+    /* Print bytes from insns_before[]. */
+    for ( i = 0; i < ARRAY_SIZE(insns_before); ++i )
+    {
+        if ( i < missing_before )
+            printk(" --");
+        else
+            printk(" %02x", insns_before[i]);
+    }
+
+    /* Print the byte under %rip. */
+    if ( missing_after != ARRAY_SIZE(insns_after) )
+        printk(" <%02x>", insns_after[0]);
+    else
+        printk(" <-->");
+
+    /* Print bytes from insns_after[]. */
+    for ( i = 1; i < ARRAY_SIZE(insns_after); ++i )
+    {
+        if ( i < (ARRAY_SIZE(insns_after) - missing_after) )
+            printk(" %02x", insns_after[i]);
+        else
+            printk(" --");
+    }
+
+    printk("\n");
+}
+
 static void show_guest_stack(struct vcpu *v, const struct cpu_user_regs *regs)
 {
     int i;
@@ -383,10 +451,17 @@ void show_stack(const struct cpu_user_regs *regs)
 
 void show_stack_overflow(unsigned int cpu, const struct cpu_user_regs *regs)
 {
-#ifdef MEMORY_GUARD
     unsigned long esp = regs->rsp;
+    unsigned long curr_stack_base = esp & ~(STACK_SIZE - 1);
+#ifdef MEMORY_GUARD
     unsigned long esp_top, esp_bottom;
+#endif
 
+    if ( _p(curr_stack_base) != stack_base[cpu] )
+        printk("Current stack base %p differs from expected %p\n",
+               _p(curr_stack_base), stack_base[cpu]);
+
+#ifdef MEMORY_GUARD
     esp_bottom = (esp | (STACK_SIZE - 1)) + 1;
     esp_top    = esp_bottom - PRIMARY_STACK_SIZE;
 
@@ -394,9 +469,12 @@ void show_stack_overflow(unsigned int cpu, const struct cpu_user_regs *regs)
            (void *)esp_top, (void *)esp_bottom, (void *)esp,
            (void *)per_cpu(init_tss, cpu).esp0);
 
-    /* Trigger overflow trace if %esp is within 512 bytes of the guard page. */
-    if ( ((unsigned long)(esp - esp_top) > 512) &&
-         ((unsigned long)(esp_top - esp) > 512) )
+    /*
+     * Trigger overflow trace if %esp is anywhere within the guard page, or
+     * with fewer than 512 bytes remaining on the primary stack.
+     */
+    if ( (esp > (esp_top + 512)) ||
+         (esp < (esp_top - PAGE_SIZE)) )
     {
         printk("No stack overflow detected. Skipping stack trace.\n");
         return;
@@ -416,12 +494,20 @@ void show_stack_overflow(unsigned int cpu, const struct cpu_user_regs *regs)
 
 void show_execution_state(const struct cpu_user_regs *regs)
 {
+    /* Prevent interleaving of output. */
+    unsigned long flags = console_lock_recursive_irqsave();
+
     show_registers(regs);
+    show_code(regs);
     show_stack(regs);
+
+    console_unlock_recursive_irqrestore(flags);
 }
 
 void vcpu_show_execution_state(struct vcpu *v)
 {
+    unsigned long flags;
+
     printk("*** Dumping Dom%d vcpu#%d state: ***\n",
            v->domain->domain_id, v->vcpu_id);
 
@@ -433,9 +519,14 @@ void vcpu_show_execution_state(struct vcpu *v)
 
     vcpu_pause(v); /* acceptably dangerous */
 
+    /* Prevent interleaving of output. */
+    flags = console_lock_recursive_irqsave();
+
     vcpu_show_registers(v);
     if ( guest_kernel_mode(v, &v->arch.user_regs) )
         show_guest_stack(v, &v->arch.user_regs);
+
+    console_unlock_recursive_irqrestore(flags);
 
     vcpu_unpause(v);
 }
@@ -824,51 +915,24 @@ int cpuid_hypervisor_leaves( uint32_t idx, uint32_t sub_idx,
 
 void pv_cpuid(struct cpu_user_regs *regs)
 {
-    uint32_t a, b, c, d;
+    uint32_t leaf, subleaf, a, b, c, d;
     struct vcpu *curr = current;
     struct domain *currd = curr->domain;
 
-    a = regs->eax;
+    leaf = a = regs->eax;
     b = regs->ebx;
-    c = regs->ecx;
+    subleaf = c = regs->ecx;
     d = regs->edx;
 
-    if ( !is_control_domain(currd) && !is_hardware_domain(currd) )
-    {
-        unsigned int cpuid_leaf = a, sub_leaf = c;
-
-        if ( !cpuid_hypervisor_leaves(a, c, &a, &b, &c, &d) )
-            domain_cpuid(currd, a, c, &a, &b, &c, &d);
-
-        switch ( cpuid_leaf )
-        {
-        case XSTATE_CPUID:
-        {
-            unsigned int _eax, _ebx, _ecx, _edx;
-            /* EBX value of main leaf 0 depends on enabled xsave features */
-            if ( sub_leaf == 0 && curr->arch.xcr0 )
-            {
-                /* reset EBX to default value first */
-                b = XSTATE_AREA_MIN_SIZE;
-                for ( sub_leaf = 2; sub_leaf < 63; sub_leaf++ )
-                {
-                    if ( !(curr->arch.xcr0 & (1ULL << sub_leaf)) )
-                        continue;
-                    domain_cpuid(currd, cpuid_leaf, sub_leaf,
-                                 &_eax, &_ebx, &_ecx, &_edx);
-                    if ( (_eax + _ebx) > b )
-                        b = _eax + _ebx;
-                }
-            }
-            goto xstate;
-        }
-        }
+    if ( cpuid_hypervisor_leaves(leaf, subleaf, &a, &b, &c, &d) )
         goto out;
-    }
 
-    cpuid_count(a, c, &a, &b, &c, &d);
+    if ( !is_control_domain(currd) && !is_hardware_domain(currd) )
+        domain_cpuid(currd, leaf, subleaf, &a, &b, &c, &d);
+    else
+        cpuid_count(leaf, subleaf, &a, &b, &c, &d);
 
-    if ( (regs->eax & 0x7fffffff) == 0x00000001 )
+    if ( (leaf & 0x7fffffff) == 0x00000001 )
     {
         /* Modify Feature Information. */
         if ( !cpu_has_apic )
@@ -883,7 +947,7 @@ void pv_cpuid(struct cpu_user_regs *regs)
         }
     }
 
-    switch ( regs->_eax )
+    switch ( leaf )
     {
     case 0x00000001:
         /* Modify Feature Information. */
@@ -918,7 +982,7 @@ void pv_cpuid(struct cpu_user_regs *regs)
         break;
 
     case 0x00000007:
-        if ( regs->_ecx == 0 )
+        if ( subleaf == 0 )
             b &= (cpufeat_mask(X86_FEATURE_BMI1) |
                   cpufeat_mask(X86_FEATURE_HLE)  |
                   cpufeat_mask(X86_FEATURE_AVX2) |
@@ -934,14 +998,29 @@ void pv_cpuid(struct cpu_user_regs *regs)
         break;
 
     case XSTATE_CPUID:
-    xstate:
         if ( !cpu_has_xsave )
             goto unsupported;
-        if ( regs->_ecx == 1 )
+        switch ( subleaf )
         {
+        case 0:
+        {
+            uint32_t tmp;
+
+            /*
+             * Always read CPUID.0xD[ECX=0].EBX from hardware, rather than
+             * domain policy.  It varies with enabled xstate, and the correct
+             * xcr0 is in context.
+             */
+            if ( !is_control_domain(currd) && !is_hardware_domain(currd) )
+                cpuid_count(leaf, subleaf, &tmp, &b, &tmp, &tmp);
+            break;
+        }
+
+        case 1:
             a &= (boot_cpu_data.x86_capability[cpufeat_word(X86_FEATURE_XSAVEOPT)] &
                   ~cpufeat_mask(X86_FEATURE_XSAVES));
             b = c = d = 0;
+            break;
         }
         break;
 
@@ -983,15 +1062,11 @@ void pv_cpuid(struct cpu_user_regs *regs)
     unsupported:
         a = b = c = d = 0;
         break;
-
-    default:
-        (void)cpuid_hypervisor_leaves(regs->eax, 0, &a, &b, &c, &d);
-        break;
     }
 
  out:
     /* VPMU may decide to modify some of the leaves */
-    vpmu_do_cpuid(regs->eax, &a, &b, &c, &d);
+    vpmu_do_cpuid(leaf, &a, &b, &c, &d);
 
     regs->eax = a;
     regs->ebx = b;
@@ -3689,7 +3764,7 @@ void __init init_idt_traps(void)
     this_cpu(compat_gdt_table) = boot_cpu_compat_gdt_table;
 }
 
-extern void (*__initconst autogen_entrypoints[NR_VECTORS])(void);
+extern void (*const autogen_entrypoints[NR_VECTORS])(void);
 void __init trap_init(void)
 {
     unsigned int vector;

@@ -831,14 +831,8 @@ out:
     return ptr;
 }
 
-static void libxl__remus_setup(libxl__egc *egc,
-                               libxl__domain_suspend_state *dss);
-static void remus_setup_done(libxl__egc *egc,
-                             libxl__remus_devices_state *rds, int rc);
-static void remus_setup_failed(libxl__egc *egc,
-                               libxl__remus_devices_state *rds, int rc);
 static void remus_failover_cb(libxl__egc *egc,
-                              libxl__domain_suspend_state *dss, int rc);
+                              libxl__domain_save_state *dss, int rc);
 
 /* TODO: Explicit Checkpoint acknowledgements via recv_fd. */
 int libxl_domain_remus_start(libxl_ctx *ctx, libxl_domain_remus_info *info,
@@ -846,7 +840,7 @@ int libxl_domain_remus_start(libxl_ctx *ctx, libxl_domain_remus_info *info,
                              const libxl_asyncop_how *ao_how)
 {
     AO_CREATE(ctx, domid, ao_how);
-    libxl__domain_suspend_state *dss;
+    libxl__domain_save_state *dss;
     int rc;
 
     libxl_domain_type type = libxl__domain_type(gc, domid);
@@ -882,80 +876,20 @@ int libxl_domain_remus_start(libxl_ctx *ctx, libxl_domain_remus_info *info,
     dss->live = 1;
     dss->debug = 0;
     dss->remus = info;
+    dss->checkpointed_stream = LIBXL_CHECKPOINTED_STREAM_REMUS;
 
     assert(info);
 
     /* Point of no return */
-    libxl__remus_setup(egc, dss);
+    libxl__remus_setup(egc, &dss->rs);
     return AO_INPROGRESS;
 
  out:
     return AO_CREATE_FAIL(rc);
 }
 
-static void libxl__remus_setup(libxl__egc *egc,
-                               libxl__domain_suspend_state *dss)
-{
-    /* Convenience aliases */
-    libxl__remus_devices_state *const rds = &dss->rds;
-    const libxl_domain_remus_info *const info = dss->remus;
-
-    STATE_AO_GC(dss->ao);
-
-    if (libxl_defbool_val(info->netbuf)) {
-        if (!libxl__netbuffer_enabled(gc)) {
-            LOG(ERROR, "Remus: No support for network buffering");
-            goto out;
-        }
-        rds->device_kind_flags |= (1 << LIBXL__DEVICE_KIND_VIF);
-    }
-
-    if (libxl_defbool_val(info->diskbuf))
-        rds->device_kind_flags |= (1 << LIBXL__DEVICE_KIND_VBD);
-
-    rds->ao = ao;
-    rds->domid = dss->domid;
-    rds->callback = remus_setup_done;
-
-    libxl__remus_devices_setup(egc, rds);
-    return;
-
-out:
-    dss->callback(egc, dss, ERROR_FAIL);
-}
-
-static void remus_setup_done(libxl__egc *egc,
-                             libxl__remus_devices_state *rds, int rc)
-{
-    libxl__domain_suspend_state *dss = CONTAINER_OF(rds, *dss, rds);
-    STATE_AO_GC(dss->ao);
-
-    if (!rc) {
-        libxl__domain_save(egc, dss);
-        return;
-    }
-
-    LOG(ERROR, "Remus: failed to setup device for guest with domid %u, rc %d",
-        dss->domid, rc);
-    rds->callback = remus_setup_failed;
-    libxl__remus_devices_teardown(egc, rds);
-}
-
-static void remus_setup_failed(libxl__egc *egc,
-                               libxl__remus_devices_state *rds, int rc)
-{
-    libxl__domain_suspend_state *dss = CONTAINER_OF(rds, *dss, rds);
-    STATE_AO_GC(dss->ao);
-
-    if (rc)
-        LOG(ERROR, "Remus: failed to teardown device after setup failed"
-            " for guest with domid %u, rc %d", dss->domid, rc);
-
-    dss->callback(egc, dss, rc);
-}
-
 static void remus_failover_cb(libxl__egc *egc,
-                              libxl__domain_suspend_state *dss, int rc)
+                              libxl__domain_save_state *dss, int rc)
 {
     STATE_AO_GC(dss->ao);
     /*
@@ -967,7 +901,7 @@ static void remus_failover_cb(libxl__egc *egc,
 }
 
 static void domain_suspend_cb(libxl__egc *egc,
-                              libxl__domain_suspend_state *dss, int rc)
+                              libxl__domain_save_state *dss, int rc)
 {
     STATE_AO_GC(dss->ao);
     int flrc;
@@ -992,7 +926,7 @@ int libxl_domain_suspend(libxl_ctx *ctx, uint32_t domid, int fd, int flags,
         goto out_err;
     }
 
-    libxl__domain_suspend_state *dss;
+    libxl__domain_save_state *dss;
     GCNEW(dss);
 
     dss->ao = ao;
@@ -1003,6 +937,7 @@ int libxl_domain_suspend(libxl_ctx *ctx, uint32_t domid, int fd, int flags,
     dss->type = type;
     dss->live = flags & LIBXL_SUSPEND_LIVE;
     dss->debug = flags & LIBXL_SUSPEND_DEBUG;
+    dss->checkpointed_stream = LIBXL_CHECKPOINTED_STREAM_NONE;
 
     rc = libxl__fd_flags_modify_save(gc, dss->fd,
                                      ~(O_NONBLOCK|O_NDELAY), 0,
@@ -5258,6 +5193,7 @@ libxl_numainfo *libxl_get_numainfo(libxl_ctx *ctx, int *nr)
 
 const libxl_version_info* libxl_get_version_info(libxl_ctx *ctx)
 {
+    GC_INIT(ctx);
     union {
         xen_extraversion_t xen_extra;
         xen_compile_info_t xen_cc;
@@ -5270,26 +5206,26 @@ const libxl_version_info* libxl_get_version_info(libxl_ctx *ctx)
     libxl_version_info *info = &ctx->version_info;
 
     if (info->xen_version_extra != NULL)
-        return info;
+        goto out;
 
     xen_version = xc_version(ctx->xch, XENVER_version, NULL);
     info->xen_version_major = xen_version >> 16;
     info->xen_version_minor = xen_version & 0xFF;
 
     xc_version(ctx->xch, XENVER_extraversion, &u.xen_extra);
-    info->xen_version_extra = strdup(u.xen_extra);
+    info->xen_version_extra = libxl__strdup(NOGC, u.xen_extra);
 
     xc_version(ctx->xch, XENVER_compile_info, &u.xen_cc);
-    info->compiler = strdup(u.xen_cc.compiler);
-    info->compile_by = strdup(u.xen_cc.compile_by);
-    info->compile_domain = strdup(u.xen_cc.compile_domain);
-    info->compile_date = strdup(u.xen_cc.compile_date);
+    info->compiler = libxl__strdup(NOGC, u.xen_cc.compiler);
+    info->compile_by = libxl__strdup(NOGC, u.xen_cc.compile_by);
+    info->compile_domain = libxl__strdup(NOGC, u.xen_cc.compile_domain);
+    info->compile_date = libxl__strdup(NOGC, u.xen_cc.compile_date);
 
     xc_version(ctx->xch, XENVER_capabilities, &u.xen_caps);
-    info->capabilities = strdup(u.xen_caps);
+    info->capabilities = libxl__strdup(NOGC, u.xen_caps);
 
     xc_version(ctx->xch, XENVER_changeset, &u.xen_chgset);
-    info->changeset = strdup(u.xen_chgset);
+    info->changeset = libxl__strdup(NOGC, u.xen_chgset);
 
     xc_version(ctx->xch, XENVER_platform_parameters, &u.p_parms);
     info->virt_start = u.p_parms.virt_start;
@@ -5297,8 +5233,10 @@ const libxl_version_info* libxl_get_version_info(libxl_ctx *ctx)
     info->pagesize = xc_version(ctx->xch, XENVER_pagesize, NULL);
 
     xc_version(ctx->xch, XENVER_commandline, &u.xen_commandline);
-    info->commandline = strdup(u.xen_commandline);
+    info->commandline = libxl__strdup(NOGC, u.xen_commandline);
 
+ out:
+    GC_FREE;
     return info;
 }
 
@@ -5557,6 +5495,7 @@ int libxl_set_vcpuonline(libxl_ctx *ctx, uint32_t domid, libxl_bitmap *cpumap)
     case LIBXL_DOMAIN_TYPE_HVM:
         switch (libxl__device_model_version_running(gc, domid)) {
         case LIBXL_DEVICE_MODEL_VERSION_QEMU_XEN_TRADITIONAL:
+        case LIBXL_DEVICE_MODEL_VERSION_NONE:
             rc = libxl__set_vcpuonline_xenstore(gc, domid, cpumap, &info);
             break;
         case LIBXL_DEVICE_MODEL_VERSION_QEMU_XEN:
@@ -5578,14 +5517,15 @@ out:
     return rc;
 }
 
-libxl_scheduler libxl_get_scheduler(libxl_ctx *ctx)
+int libxl_get_scheduler(libxl_ctx *ctx)
 {
-    libxl_scheduler sched, ret;
+    int r, sched;
+
     GC_INIT(ctx);
-    if ((ret = xc_sched_id(ctx->xch, (int *)&sched)) != 0) {
-        LOGE(ERROR, "getting domain info list");
-        return ERROR_FAIL;
-        GC_FREE;
+    r = xc_sched_id(ctx->xch, &sched);
+    if (r != 0) {
+        LOGE(ERROR, "getting current scheduler id");
+        sched = ERROR_FAIL;
     }
     GC_FREE;
     return sched;

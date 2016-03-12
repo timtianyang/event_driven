@@ -1,9 +1,28 @@
+/*
+ * arch/arm/hvm.c
+ *
+ * Arch-specific hardware virtual machine abstractions.
+ *
+ * This program is free software; you can redistribute it and/or modify it
+ * under the terms and conditions of the GNU General Public License,
+ * version 2, as published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ *
+ * You should have received a copy of the GNU General Public License along with
+ * this program; If not, see <http://www.gnu.org/licenses/>.
+ */
+
 #include <xen/config.h>
 #include <xen/init.h>
 #include <xen/lib.h>
 #include <xen/errno.h>
 #include <xen/guest_access.h>
 #include <xen/sched.h>
+#include <xen/vm_event.h>
 
 #include <xsm/xsm.h>
 
@@ -14,7 +33,6 @@
 #include <asm/hypercall.h>
 
 long do_hvm_op(unsigned long op, XEN_GUEST_HANDLE_PARAM(void) arg)
-
 {
     long rc = 0;
 
@@ -55,6 +73,13 @@ long do_hvm_op(unsigned long op, XEN_GUEST_HANDLE_PARAM(void) arg)
         break;
     }
 
+    case HVMOP_guest_request_vm_event:
+        if ( guest_handle_is_null(arg) )
+            vm_event_monitor_guest_request();
+        else
+            rc = -EINVAL;
+        break;
+
     default:
     {
         gdprintk(XENLOG_DEBUG, "HVMOP op=%lu: not implemented\n", op);
@@ -65,3 +90,13 @@ long do_hvm_op(unsigned long op, XEN_GUEST_HANDLE_PARAM(void) arg)
 
     return rc;
 }
+
+/*
+ * Local variables:
+ * mode: C
+ * c-file-style: "BSD"
+ * c-basic-offset: 4
+ * tab-width: 4
+ * indent-tabs-mode: nil
+ * End:
+ */

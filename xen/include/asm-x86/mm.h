@@ -5,6 +5,7 @@
 #include <xen/config.h>
 #include <xen/list.h>
 #include <xen/spinlock.h>
+#include <xen/rwlock.h>
 #include <asm/io.h>
 #include <asm/uaccess.h>
 #include <asm/x86_emulate.h>
@@ -322,7 +323,7 @@ int free_page_type(struct page_info *page, unsigned long type,
 
 void init_guest_l4_table(l4_pgentry_t[], const struct domain *,
                          bool_t zap_ro_mpt);
-void fill_ro_mpt(unsigned long mfn);
+bool_t fill_ro_mpt(unsigned long mfn);
 void zap_ro_mpt(unsigned long mfn);
 
 int is_iomem_page(unsigned long mfn);
@@ -478,11 +479,9 @@ extern struct rangeset *mmio_ro_ranges;
 #define compat_cr3_to_pfn(cr3) (((unsigned)(cr3) >> 12) | ((unsigned)(cr3) << 20))
 
 #ifdef MEMORY_GUARD
-void memguard_init(void);
 void memguard_guard_range(void *p, unsigned long l);
 void memguard_unguard_range(void *p, unsigned long l);
 #else
-#define memguard_init()                ((void)0)
 #define memguard_guard_range(_p,_l)    ((void)0)
 #define memguard_unguard_range(_p,_l)  ((void)0)
 #endif

@@ -663,6 +663,11 @@ static void alloc_qos_data(int ncpu)
     }
     pgsize = getpagesize();
     dummy = malloc(pgsize);
+    if (!dummy) {
+        PERROR("malloc");
+        exit(EXIT_FAILURE);
+    }
+    memset(dummy, 0, pgsize);
 
     for (n=0; n<ncpu; n++) {
 
@@ -689,6 +694,7 @@ static void alloc_qos_data(int ncpu)
         cpu_qos_data[n] = new_qos;
     }
     free(dummy);
+    close(qos_fd);
     new_qos = NULL;
 }
 

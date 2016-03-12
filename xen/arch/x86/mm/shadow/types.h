@@ -99,6 +99,9 @@ static inline u32 shadow_l4e_get_flags(shadow_l4e_t sl4e)
 static inline shadow_l1e_t
 shadow_l1e_remove_flags(shadow_l1e_t sl1e, u32 flags)
 { l1e_remove_flags(sl1e, flags); return sl1e; }
+static inline shadow_l1e_t
+shadow_l1e_flip_flags(shadow_l1e_t sl1e, u32 flags)
+{ l1e_flip_flags(sl1e, flags); return sl1e; }
 
 static inline shadow_l1e_t shadow_l1e_empty(void)
 { return l1e_empty(); }
@@ -247,7 +250,6 @@ static inline shadow_l4e_t shadow_l4e_from_mfn(mfn_t mfn, u32 flags)
 #define sh_detach_old_tables       INTERNAL_NAME(sh_detach_old_tables)
 #define sh_x86_emulate_write       INTERNAL_NAME(sh_x86_emulate_write)
 #define sh_x86_emulate_cmpxchg     INTERNAL_NAME(sh_x86_emulate_cmpxchg)
-#define sh_x86_emulate_cmpxchg8b   INTERNAL_NAME(sh_x86_emulate_cmpxchg8b)
 #define sh_audit_l1_table          INTERNAL_NAME(sh_audit_l1_table)
 #define sh_audit_fl1_table         INTERNAL_NAME(sh_audit_fl1_table)
 #define sh_audit_l2_table          INTERNAL_NAME(sh_audit_l2_table)

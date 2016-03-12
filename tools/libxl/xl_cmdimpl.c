@@ -499,11 +499,16 @@ static int do_daemonize(char *name, const char *pidfile)
 
     CHK_SYSCALL(logfile = open(fullname, O_WRONLY|O_CREAT|O_APPEND, 0644));
     free(fullname);
+    assert(logfile >= 3);
 
     CHK_SYSCALL(nullfd = open("/dev/null", O_RDONLY));
+    assert(nullfd >= 3);
+
     dup2(nullfd, 0);
     dup2(logfile, 1);
     dup2(logfile, 2);
+
+    close(nullfd);
 
     CHK_SYSCALL(daemon(0, 1));
 
@@ -2793,12 +2798,8 @@ static uint32_t create_domain(struct domain_create *dom_info)
                 return ERROR_FAIL;
             }
             /* allocate space for the extra config plus two EOLs plus \0 */
-            config_data = realloc(config_data, config_len
+            config_data = xrealloc(config_data, config_len
                 + strlen(extra_config) + 2 + 1);
-            if (!config_data) {
-                fprintf(stderr, "Failed to realloc config_data\n");
-                return ERROR_FAIL;
-            }
             config_len += sprintf(config_data + config_len, "\n%s\n",
                 extra_config);
         }
@@ -2867,11 +2868,13 @@ start:
     if (rc < 0)
         goto error_out;
 
-    ret = freemem(domid, &d_config.b_info);
-    if (ret < 0) {
-        fprintf(stderr, "failed to free memory for the domain\n");
-        ret = ERROR_FAIL;
-        goto error_out;
+    if (domid_soft_reset == INVALID_DOMID) {
+        ret = freemem(domid, &d_config.b_info);
+        if (ret < 0) {
+            fprintf(stderr, "failed to free memory for the domain\n");
+            ret = ERROR_FAIL;
+            goto error_out;
+        }
     }
 
     libxl_asyncprogress_how autoconnect_console_how_buf;
@@ -3065,6 +3068,13 @@ error_out:
     }
 
 out:
+    if (restore_fd_to_close >= 0) {
+        if (close(restore_fd_to_close))
+            fprintf(stderr, "Failed to close restoring file, fd %d, errno %d\n",
+                    restore_fd_to_close, errno);
+        restore_fd_to_close = -1;
+    }
+
     if (logfile != 2)
         close(logfile);
 
@@ -4424,7 +4434,8 @@ static void migrate_domain(uint32_t domid, const char *rune, int debug,
 }
 
 static void migrate_receive(int debug, int daemonize, int monitor,
-                            int send_fd, int recv_fd, int remus)
+                            int send_fd, int recv_fd,
+                            libxl_checkpointed_stream checkpointed)
 {
     uint32_t domid;
     int rc, rc2;
@@ -4449,7 +4460,7 @@ static void migrate_receive(int debug, int daemonize, int monitor,
     dom_info.paused = 1;
     dom_info.migrate_fd = recv_fd;
     dom_info.migration_domname_r = &migration_domname;
-    dom_info.checkpointed_stream = remus;
+    dom_info.checkpointed_stream = checkpointed;
 
     rc = create_domain(&dom_info);
     if (rc < 0) {
@@ -4460,7 +4471,8 @@ static void migrate_receive(int debug, int daemonize, int monitor,
 
     domid = rc;
 
-    if (remus) {
+    switch (checkpointed) {
+    case LIBXL_CHECKPOINTED_STREAM_REMUS:
         /* If we are here, it means that the sender (primary) has crashed.
          * TODO: Split-Brain Check.
          */
@@ -4493,6 +4505,9 @@ static void migrate_receive(int debug, int daemonize, int monitor,
                     common_domname, domid, rc);
 
         exit(rc ? -ERROR_FAIL: 0);
+    default:
+        /* do nothing */
+        break;
     }
 
     fprintf(stderr, "migration target: Transfer complete,"
@@ -4630,7 +4645,8 @@ int main_restore(int argc, char **argv)
 
 int main_migrate_receive(int argc, char **argv)
 {
-    int debug = 0, daemonize = 1, monitor = 1, remus = 0;
+    int debug = 0, daemonize = 1, monitor = 1;
+    libxl_checkpointed_stream checkpointed = LIBXL_CHECKPOINTED_STREAM_NONE;
     int opt;
 
     SWITCH_FOREACH_OPT(opt, "Fedr", NULL, "migrate-receive", 0) {
@@ -4645,7 +4661,7 @@ int main_migrate_receive(int argc, char **argv)
         debug = 1;
         break;
     case 'r':
-        remus = 1;
+        checkpointed = LIBXL_CHECKPOINTED_STREAM_REMUS;
         break;
     }
 
@@ -4655,7 +4671,7 @@ int main_migrate_receive(int argc, char **argv)
     }
     migrate_receive(debug, daemonize, monitor,
                     STDOUT_FILENO, STDIN_FILENO,
-                    remus);
+                    checkpointed);
 
     return 0;
 }
@@ -6033,9 +6049,11 @@ int main_sched_credit(int argc, char **argv)
 {
     const char *dom = NULL;
     const char *cpupool = NULL;
-    int weight = 256, cap = 0, opt_w = 0, opt_c = 0;
-    int opt_s = 0;
-    int tslice = 0, opt_t = 0, ratelimit = 0, opt_r = 0;
+    int weight = 256, cap = 0;
+    int tslice = 0, ratelimit = 0;
+    bool opt_w = false, opt_c = false;
+    bool opt_t = false, opt_r = false;
+    bool opt_s = false;
     int opt, rc;
     static struct option opts[] = {
         {"domain", 1, 0, 'd'},
@@ -6054,22 +6072,22 @@ int main_sched_credit(int argc, char **argv)
         break;
     case 'w':
         weight = strtol(optarg, NULL, 10);
-        opt_w = 1;
+        opt_w = true;
         break;
     case 'c':
         cap = strtol(optarg, NULL, 10);
-        opt_c = 1;
+        opt_c = true;
         break;
     case 't':
         tslice = strtol(optarg, NULL, 10);
-        opt_t = 1;
+        opt_t = true;
         break;
     case 'r':
         ratelimit = strtol(optarg, NULL, 10);
-        opt_r = 1;
+        opt_r = true;
         break;
     case 's':
-        opt_s = 1;
+        opt_s = true;
         break;
     case 'p':
         cpupool = optarg;
@@ -6155,7 +6173,8 @@ int main_sched_credit2(int argc, char **argv)
 {
     const char *dom = NULL;
     const char *cpupool = NULL;
-    int weight = 256, opt_w = 0;
+    int weight = 256;
+    bool opt_w = false;
     int opt, rc;
     static struct option opts[] = {
         {"domain", 1, 0, 'd'},
@@ -6170,7 +6189,7 @@ int main_sched_credit2(int argc, char **argv)
         break;
     case 'w':
         weight = strtol(optarg, NULL, 10);
-        opt_w = 1;
+        opt_w = true;
         break;
     case 'p':
         cpupool = optarg;
@@ -6244,11 +6263,11 @@ int main_sched_rtds(int argc, char **argv)
         break;
     case 'p':
         period = strtol(optarg, NULL, 10);
-        opt_p = 1;
+        opt_p = true;
         break;
     case 'b':
         budget = strtol(optarg, NULL, 10);
-        opt_b = 1;
+        opt_b = true;
         break;
     case 'c':
         cpupool = optarg;
@@ -6944,6 +6963,7 @@ static char *current_time_to_string(time_t now)
 static void print_dom0_uptime(int short_mode, time_t now)
 {
     int fd;
+    ssize_t nr;
     char buf[512];
     uint32_t uptime = 0;
     char *uptime_str = NULL;
@@ -6954,11 +6974,14 @@ static void print_dom0_uptime(int short_mode, time_t now)
     if (fd == -1)
         goto err;
 
-    if (read(fd, buf, sizeof(buf)) == -1) {
+    nr = read(fd, buf, sizeof(buf) - 1);
+    if (nr == -1) {
         close(fd);
         goto err;
     }
     close(fd);
+
+    buf[nr] = '\0';
 
     strtok(buf, " ");
     uptime = strtoul(buf, NULL, 10);
@@ -7040,8 +7063,10 @@ static void print_uptime(int short_mode, uint32_t doms[], int nb_doms)
             fprintf(stderr, "Could not list vms.\n");
             return;
         }
-        for (i = 0; i < nb_vm; i++)
+        for (i = 0; i < nb_vm; i++) {
+            if (info[i].domid == 0) continue;
             print_domU_uptime(info[i].domid, short_mode, now);
+        }
         libxl_vminfo_list_free(info, nb_vm);
     } else {
         for (i = 0; i < nb_doms; i++) {

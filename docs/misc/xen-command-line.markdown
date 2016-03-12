@@ -873,7 +873,7 @@ debug hypervisor only).
 > Default: `new` unless directed-EOI is supported
 
 ### iommu
-> `= List of [ <boolean> | force | required | intremap | qinval | snoop | sharept | dom0-passthrough | dom0-strict | amd-iommu-perdev-intremap | workaround_bios_bug | igfx | verbose | debug ]`
+> `= List of [ <boolean> | force | required | intremap | intpost | qinval | snoop | sharept | dom0-passthrough | dom0-strict | amd-iommu-perdev-intremap | workaround_bios_bug | igfx | verbose | debug ]`
 
 > Sub-options:
 
@@ -899,6 +899,13 @@ debug hypervisor only).
 
 >> Control the use of interrupt remapping (DMA remapping will always be enabled
 >> if IOMMU functionality is enabled).
+
+> `intpost`
+
+> Default: `false`
+
+>> Control the use of interrupt posting, which depends on the availability of
+>> interrupt remapping.
 
 > `qinval` (VT-d)
 
@@ -1083,6 +1090,15 @@ limit is ignored by Xen.
 > Default: `1`
 
 Specify if the MMConfig space should be enabled.
+
+### mmio-relax
+> `= <boolean> | all`
+
+> Default: `false`
+
+By default, domains may not create cached mappings to MMIO regions.
+This option relaxes the check for Domain 0 (or when using `all`, all PV
+domains), to permit the use of cacheable MMIO mappings.
 
 ### msi
 > `= <boolean>`

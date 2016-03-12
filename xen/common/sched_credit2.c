@@ -382,7 +382,7 @@ __update_svc_load(const struct scheduler *ops,
 
     {
         struct {
-            unsigned dom:16,vcpu:16;
+            unsigned vcpu:16, dom:16;
             unsigned v_avgload:32;
         } d;
         d.dom = svc->vcpu->domain->domain_id;
@@ -450,13 +450,13 @@ runq_insert(const struct scheduler *ops, unsigned int cpu, struct csched2_vcpu *
 
     {
         struct {
-            unsigned dom:16,vcpu:16;
+            unsigned vcpu:16, dom:16;
             unsigned pos;
         } d;
         d.dom = svc->vcpu->domain->domain_id;
         d.vcpu = svc->vcpu->vcpu_id;
         d.pos = pos;
-        trace_var(TRC_CSCHED2_RUNQ_POS, 0,
+        trace_var(TRC_CSCHED2_RUNQ_POS, 1,
                   sizeof(d),
                   (unsigned char *)&d);
     }
@@ -536,7 +536,7 @@ runq_tickle(const struct scheduler *ops, unsigned int cpu, struct csched2_vcpu *
 
         /* TRACE */ {
             struct {
-                unsigned dom:16,vcpu:16;
+                unsigned vcpu:16, dom:16;
                 unsigned credit;
             } d;
             d.dom = cur->vcpu->domain->domain_id;
@@ -561,10 +561,10 @@ tickle:
 
     /* TRACE */ {
         struct {
-            unsigned cpu:8;
+            unsigned cpu:16, pad:16;
         } d;
-        d.cpu = ipid;
-        trace_var(TRC_CSCHED2_TICKLE, 0,
+        d.cpu = ipid; d.pad = 0;
+        trace_var(TRC_CSCHED2_TICKLE, 1,
                   sizeof(d),
                   (unsigned char *)&d);
     }
@@ -634,7 +634,7 @@ static void reset_credit(const struct scheduler *ops, int cpu, s_time_t now,
 
         /* TRACE */ {
             struct {
-                unsigned dom:16,vcpu:16;
+                unsigned vcpu:16, dom:16;
                 unsigned credit_start, credit_end;
                 unsigned multiplier;
             } d;
@@ -683,7 +683,7 @@ void burn_credits(struct csched2_runqueue_data *rqd, struct csched2_vcpu *svc, s
     /* TRACE */
     {
         struct {
-            unsigned dom:16,vcpu:16;
+            unsigned vcpu:16, dom:16;
             unsigned credit;
             int delta;
         } d;
@@ -812,7 +812,7 @@ __runq_assign(struct csched2_vcpu *svc, struct csched2_runqueue_data *rqd)
     /* TRACE */
     {
         struct {
-            unsigned dom:16,vcpu:16;
+            unsigned vcpu:16, dom:16;
             unsigned rqi:16;
         } d;
         d.dom = svc->vcpu->domain->domain_id;
@@ -1721,7 +1721,7 @@ csched2_schedule(
      */
     if ( tasklet_work_scheduled )
     {
-        trace_var(TRC_CSCHED2_SCHED_TASKLET, 0, 0,  NULL);
+        trace_var(TRC_CSCHED2_SCHED_TASKLET, 1, 0,  NULL);
         snext = CSCHED2_VCPU(idle_vcpu[cpu]);
     }
     else
@@ -2183,22 +2183,20 @@ csched2_init(struct scheduler *ops)
 }
 
 static void
-csched2_deinit(const struct scheduler *ops)
+csched2_deinit(struct scheduler *ops)
 {
     struct csched2_private *prv;
 
     prv = CSCHED2_PRIV(ops);
+    ops->sched_data = NULL;
     xfree(prv);
 }
-
-
-static struct csched2_private _csched2_priv;
 
 static const struct scheduler sched_credit2_def = {
     .name           = "SMP Credit Scheduler rev2",
     .opt_name       = "credit2",
     .sched_id       = XEN_SCHEDULER_CREDIT2,
-    .sched_data     = &_csched2_priv,
+    .sched_data     = NULL,
 
     .init_domain    = csched2_dom_init,
     .destroy_domain = csched2_dom_destroy,

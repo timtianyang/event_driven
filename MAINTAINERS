@@ -127,14 +127,13 @@ F:	xen/common/sched_arinc653.c
 F:	tools/libxc/xc_arinc653.c
 
 ARM (W/ VIRTUALISATION EXTENSIONS) ARCHITECTURE
-M:	Ian Campbell <ian.campbell@citrix.com>
 M:	Stefano Stabellini <stefano.stabellini@citrix.com>
 S:	Supported
 L:	xen-devel@lists.xen.org
 F:	xen/arch/arm/
 F:	xen/include/asm-arm/
 F:	xen/drivers/char/cadence-uart.c
-F:	xen/drivers/char/dt-uart.c
+F:	xen/drivers/char/arm-uart.c
 F:	xen/drivers/char/exynos4210-uart.c
 F:	xen/drivers/char/omap-uart.c
 F:	xen/drivers/char/pl011.c
@@ -147,7 +146,6 @@ S:	Supported
 F:	xen/common/cpupool.c
 
 DEVICE TREE
-M:	Ian Campbell <ian.campbell@citrix.com>
 M:	Stefano Stabellini <stefano.stabellini@citrix.com>
 S:	Supported
 F:	xen/common/libfdt/
@@ -176,11 +174,6 @@ M:	Mukesh Rathor <mukesh.rathor@oracle.com>
 S:	Supported
 F:	xen/arch/x86/debug.c
 F:	tools/debugger/gdbsx/
-
-HISILICON HIP04 SUPPORT
-M:	Zoltan Kiss <zoltan.kiss@huawei.com>
-S:	Supported
-F:	xen/arch/arm/gic-hip04.c
 
 INTEL(R) TRUSTED EXECUTION TECHNOLOGY (TXT)
 M:	Gang Wei <gang.wei@intel.com>
@@ -303,7 +296,7 @@ S:	Supported
 F:	xen/common/sched*
 
 SEABIOS UPSTREAM
-M:	Ian Campbell <ian.campbell@citrix.com>
+M:	Wei Liu <wei.liu2@citrix.com>
 S:	Supported
 T:	git git://xenbits.xen.org/seabios.git
 
@@ -318,7 +311,6 @@ F:	stubdom/
 TOOLSTACK
 M:	Ian Jackson <ian.jackson@eu.citrix.com>
 M:	Stefano Stabellini <stefano.stabellini@eu.citrix.com>
-M:	Ian Campbell <ian.campbell@citrix.com>
 M:	Wei Liu <wei.liu2@citrix.com>
 S:	Supported
 F:	autogen.sh
@@ -341,6 +333,12 @@ F:	xen/common/tmem*
 F:	xen/include/xen/tmem*
 F:	docs/misc/tmem*
 
+TRAVIS CI
+M:	Doug Goldstein <cardoe@cardoe.com>
+W:	https://travis-ci.org/xen-project/xen
+S:	Supported
+F:	.travis.yml
+
 UNMODIFIED LINUX PV DRIVERS
 M:	Keir Fraser <keir@xen.org>
 M:	Jan Beulich <jbeulich@suse.com>
@@ -360,9 +358,10 @@ M:	Tamas K Lengyel <tamas@tklengyel.com>
 S:	Supported
 F:	xen/common/vm_event.c
 F:	xen/common/mem_access.c
+F:	xen/common/monitor.c
 F:	xen/arch/x86/hvm/event.c
 F:	xen/arch/x86/monitor.c
-F:	xen/arch/x86/vm_event.c
+F:	xen/arch/*/vm_event.c
 F:	tools/tests/xen-access
 
 VTPM
@@ -421,7 +420,6 @@ F:  xen/xsm/
 F:  docs/misc/xsm-flask.txt
 
 THE REST
-M:	Ian Campbell <ian.campbell@citrix.com>
 M:	Ian Jackson <ian.jackson@eu.citrix.com>
 M:	Jan Beulich <jbeulich@suse.com>
 M:	Keir Fraser <keir@xen.org>

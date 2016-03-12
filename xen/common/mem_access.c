@@ -67,7 +67,7 @@ int mem_access_memop(unsigned long cmd,
             break;
 
         rc = p2m_set_mem_access(d, _gfn(mao.pfn), mao.nr, start_iter,
-                                MEMOP_CMD_MASK, mao.access);
+                                MEMOP_CMD_MASK, mao.access, 0);
         if ( rc > 0 )
         {
             ASSERT(!(rc & MEMOP_CMD_MASK));
@@ -97,14 +97,6 @@ int mem_access_memop(unsigned long cmd,
 
         break;
     }
-
-    case XENMEM_access_op_enable_emulate:
-        rc = p2m_mem_access_enable_emulate(d);
-        break;
-
-    case XENMEM_access_op_disable_emulate:
-        rc = p2m_mem_access_disable_emulate(d);
-        break;
 
     default:
         rc = -ENOSYS;

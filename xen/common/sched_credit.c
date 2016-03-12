@@ -63,9 +63,14 @@
 
 /*
  * Flags
+ *
+ * Note that svc->flags (where these flags live) is protected by an
+ * inconsistent set of locks. Therefore atomic-safe bit operations must
+ * be used for accessing it.
  */
 #define CSCHED_FLAG_VCPU_PARKED    0x0  /* VCPU over capped credits */
 #define CSCHED_FLAG_VCPU_YIELD     0x1  /* VCPU yielding */
+#define CSCHED_FLAG_VCPU_MIGRATING 0x2  /* VCPU may have moved to a new pcpu */
 
 
 /*
@@ -126,6 +131,8 @@
 #define TRC_CSCHED_STOLEN_VCPU   TRC_SCHED_CLASS_EVT(CSCHED, 4)
 #define TRC_CSCHED_PICKED_CPU    TRC_SCHED_CLASS_EVT(CSCHED, 5)
 #define TRC_CSCHED_TICKLE        TRC_SCHED_CLASS_EVT(CSCHED, 6)
+#define TRC_CSCHED_BOOST_START   TRC_SCHED_CLASS_EVT(CSCHED, 7)
+#define TRC_CSCHED_BOOST_END     TRC_SCHED_CLASS_EVT(CSCHED, 8)
 
 
 /*
@@ -360,9 +367,9 @@ boolean_param("tickle_one_idle_cpu", opt_tickle_one_idle);
 
 DEFINE_PER_CPU(unsigned int, last_tickle_cpu);
 
-static inline void
-__runq_tickle(unsigned int cpu, struct csched_vcpu *new)
+static inline void __runq_tickle(struct csched_vcpu *new)
 {
+    unsigned int cpu = new->vcpu->processor;
     struct csched_vcpu * const cur = CSCHED_VCPU(curr_on_cpu(cpu));
     struct csched_private *prv = CSCHED_PRIV(per_cpu(scheduler, cpu));
     cpumask_t mask, idle_mask, *online;
@@ -374,7 +381,6 @@ __runq_tickle(unsigned int cpu, struct csched_vcpu *new)
     online = cpupool_domain_cpumask(new->sdom->dom);
     cpumask_and(&idle_mask, prv->idlers, online);
     idlers_empty = cpumask_empty(&idle_mask);
-
 
     /*
      * If the pcpu is idle, or there are no idlers and the new
@@ -477,7 +483,7 @@ __runq_tickle(unsigned int cpu, struct csched_vcpu *new)
         {
             /* Avoid TRACE_*: saves checking !tb_init_done each step */
             for_each_cpu(cpu, &mask)
-                __trace_var(TRC_CSCHED_TICKLE, 0, sizeof(cpu), &cpu);
+                __trace_var(TRC_CSCHED_TICKLE, 1, sizeof(cpu), &cpu);
         }
 
         /* Send scheduler interrupts to designated CPUs */
@@ -785,6 +791,16 @@ _csched_cpu_pick(const struct scheduler *ops, struct vcpu *vc, bool_t commit)
 static int
 csched_cpu_pick(const struct scheduler *ops, struct vcpu *vc)
 {
+    struct csched_vcpu *svc = CSCHED_VCPU(vc);
+
+    /*
+     * We have been called by vcpu_migrate() (in schedule.c), as part
+     * of the process of seeing if vc can be migrated to another pcpu.
+     * We make a note about this in svc->flags so that later, in
+     * csched_vcpu_wake() (still called from vcpu_migrate()) we won't
+     * get boosted, which we don't deserve as we are "only" migrating.
+     */
+    set_bit(CSCHED_FLAG_VCPU_MIGRATING, &svc->flags);
     return _csched_cpu_pick(ops, vc, 1);
 }
 
@@ -856,7 +872,11 @@ csched_vcpu_acct(struct csched_private *prv, unsigned int cpu)
      * amount of CPU resources and should no longer be boosted.
      */
     if ( svc->pri == CSCHED_PRI_TS_BOOST )
+    {
         svc->pri = CSCHED_PRI_TS_UNDER;
+        TRACE_2D(TRC_CSCHED_BOOST_END, svc->sdom->dom->domain_id,
+                 svc->vcpu->vcpu_id);
+    }
 
     /*
      * Update credits
@@ -980,11 +1000,11 @@ static void
 csched_vcpu_wake(const struct scheduler *ops, struct vcpu *vc)
 {
     struct csched_vcpu * const svc = CSCHED_VCPU(vc);
-    const unsigned int cpu = vc->processor;
+    bool_t migrating;
 
     BUG_ON( is_idle_vcpu(vc) );
 
-    if ( unlikely(curr_on_cpu(cpu) == vc) )
+    if ( unlikely(curr_on_cpu(vc->processor) == vc) )
     {
         SCHED_STAT_CRANK(vcpu_wake_running);
         return;
@@ -1016,19 +1036,25 @@ csched_vcpu_wake(const struct scheduler *ops, struct vcpu *vc)
      * more CPU resource intensive VCPUs without impacting overall 
      * system fairness.
      *
-     * The one exception is for VCPUs of capped domains unpausing
-     * after earning credits they had overspent. We don't boost
-     * those.
+     * There are two cases, when we don't want to boost:
+     *  - VCPUs that are waking up after a migration, rather than
+     *    after having block;
+     *  - VCPUs of capped domains unpausing after earning credits
+     *    they had overspent.
      */
-    if ( svc->pri == CSCHED_PRI_TS_UNDER &&
+    migrating = test_and_clear_bit(CSCHED_FLAG_VCPU_MIGRATING, &svc->flags);
+
+    if ( !migrating && svc->pri == CSCHED_PRI_TS_UNDER &&
          !test_bit(CSCHED_FLAG_VCPU_PARKED, &svc->flags) )
     {
+        TRACE_2D(TRC_CSCHED_BOOST_START, vc->domain->domain_id, vc->vcpu_id);
+        SCHED_STAT_CRANK(vcpu_boost);
         svc->pri = CSCHED_PRI_TS_BOOST;
     }
 
     /* Put the VCPU on the runq and tickle CPUs */
     __runq_insert(svc);
-    __runq_tickle(cpu, svc);
+    __runq_tickle(svc);
 }
 
 static void
@@ -1092,6 +1118,7 @@ __csched_set_tslice(struct csched_private *prv, unsigned timeslice)
         prv->ticks_per_tslice = 1;
     prv->tick_period_us = prv->tslice_ms * 1000 / prv->ticks_per_tslice;
     prv->credits_per_tslice = CSCHED_CREDITS_PER_MSEC * prv->tslice_ms;
+    prv->credit = prv->credits_per_tslice * prv->ncpus;
 }
 
 static int
@@ -1101,6 +1128,7 @@ csched_sys_cntl(const struct scheduler *ops,
     int rc = -EINVAL;
     xen_sysctl_credit_schedule_t *params = &sc->u.sched_credit;
     struct csched_private *prv = CSCHED_PRIV(ops);
+    unsigned long flags;
 
     switch ( sc->cmd )
     {
@@ -1112,8 +1140,12 @@ csched_sys_cntl(const struct scheduler *ops,
                     || params->ratelimit_us < XEN_SYSCTL_SCHED_RATELIMIT_MIN))
             || MICROSECS(params->ratelimit_us) > MILLISECS(params->tslice_ms) )
                 goto out;
+
+        spin_lock_irqsave(&prv->lock, flags);
         __csched_set_tslice(prv, params->tslice_ms);
         prv->ratelimit_us = params->ratelimit_us;
+        spin_unlock_irqrestore(&prv->lock, flags);
+
         /* FALLTHRU */
     case XEN_SYSCTL_SCHEDOP_getinfo:
         params->tslice_ms = prv->tslice_ms;
@@ -1953,13 +1985,14 @@ csched_init(struct scheduler *ops)
 }
 
 static void
-csched_deinit(const struct scheduler *ops)
+csched_deinit(struct scheduler *ops)
 {
     struct csched_private *prv;
 
     prv = CSCHED_PRIV(ops);
     if ( prv != NULL )
     {
+        ops->sched_data = NULL;
         free_cpumask_var(prv->cpus);
         free_cpumask_var(prv->idlers);
         xfree(prv);
@@ -1989,13 +2022,11 @@ static void csched_tick_resume(const struct scheduler *ops, unsigned int cpu)
             - now % MICROSECS(prv->tick_period_us) );
 }
 
-static struct csched_private _csched_priv;
-
 static const struct scheduler sched_credit_def = {
     .name           = "SMP Credit Scheduler",
     .opt_name       = "credit",
     .sched_id       = XEN_SCHEDULER_CREDIT,
-    .sched_data     = &_csched_priv,
+    .sched_data     = NULL,
 
     .init_domain    = csched_dom_init,
     .destroy_domain = csched_dom_destroy,

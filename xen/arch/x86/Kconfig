@@ -3,8 +3,10 @@ config X86_64
 
 config X86
 	def_bool y
+	select ACPI
+	select ACPI_LEGACY_TABLES_LOOKUP
 	select COMPAT
-	select HAS_ACPI
+	select CORE_PARKING
 	select HAS_CPUFREQ
 	select HAS_EHCI
 	select HAS_GDBSX
@@ -17,7 +19,8 @@ config X86
 	select HAS_PASSTHROUGH
 	select HAS_PCI
 	select HAS_PDX
-	select HAS_VGA
+	select NUMA
+	select VGA
 
 config ARCH_DEFCONFIG
 	string
@@ -26,6 +29,24 @@ config ARCH_DEFCONFIG
 menu "Architecture Features"
 
 source "arch/Kconfig"
+
+config SHADOW_PAGING
+        bool "Shadow Paging"
+        default y
+        ---help---
+
+          Shadow paging is a software alternative to hardware paging support
+          (Intel EPT, AMD NPT).
+
+          It is required for:
+            * Running HVM guests on hardware lacking hardware paging support
+              (First-generation Intel VT-x or AMD SVM).
+            * Live migration of PV guests.
+
+          Under a small number of specific workloads, shadow paging may be
+          deliberately used as a performance optimisation.
+
+          If unsure, say Y.
 
 config BIGMEM
 	bool "big memory support"

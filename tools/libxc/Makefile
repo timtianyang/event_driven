@@ -105,6 +105,7 @@ endif
 
 CFLAGS   += -Werror -Wmissing-prototypes
 CFLAGS   += -I. -I./include $(CFLAGS_xeninclude)
+CFLAGS   += -D__XEN_TOOLS__
 
 # Needed for posix_fadvise64() in xc_linux.c
 CFLAGS-$(CONFIG_Linux) += -D_GNU_SOURCE
@@ -225,10 +226,10 @@ else
 zlib-options = $(ZLIB)
 endif
 
-xc_dom_bzimageloader.o: CFLAGS += $(call zlib-options,D)
-xc_dom_bzimageloader.opic: CFLAGS += $(call zlib-options,D)
+xc_dom_bzimageloader.o: CFLAGS += $(filter -D%,$(zlib-options))
+xc_dom_bzimageloader.opic: CFLAGS += $(filter -D%,$(zlib-options))
 
-libxenguest.so.$(MAJOR).$(MINOR): COMPRESSION_LIBS = $(call zlib-options,l)
+libxenguest.so.$(MAJOR).$(MINOR): COMPRESSION_LIBS = $(filter -l%,$(zlib-options))
 libxenguest.so.$(MAJOR).$(MINOR): $(GUEST_PIC_OBJS) libxenctrl.so
 	$(CC) $(LDFLAGS) -Wl,$(SONAME_LDFLAG) -Wl,libxenguest.so.$(MAJOR) $(SHLIB_LDFLAGS) -o $@ $(GUEST_PIC_OBJS) $(COMPRESSION_LIBS) -lz $(LDLIBS_libxenevtchn) $(LDLIBS_libxenctrl) $(PTHREAD_LIBS) $(APPEND_LDFLAGS)
 

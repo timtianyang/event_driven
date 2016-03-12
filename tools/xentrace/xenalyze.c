@@ -363,6 +363,8 @@ void parse_symbol_file(char *fn) {
             p=&((*p)->next);
         }
     }
+
+    fclose(symbol_file);
 }
 
 /* WARNING not thread safe */
@@ -509,7 +511,6 @@ struct {
 #define HVM_VMX_EXIT_REASON_MAX (EXIT_REASON_XSETBV+1)
 
 char * hvm_vmx_exit_reason_name[HVM_VMX_EXIT_REASON_MAX] = {
-    [0] = "NONE",
     [EXIT_REASON_EXCEPTION_NMI]="EXCEPTION_NMI",
     [EXIT_REASON_EXTERNAL_INTERRUPT]="EXTERNAL_INTERRUPT",
     [EXIT_REASON_TRIPLE_FAULT]="TRIPLE_FAULT",
@@ -2132,10 +2133,14 @@ float weighted_percentile(float * A, /* values */
         } while (I <= J); /* Keep going until our pointers meet or pass */
 
         /* Re-adjust L and R, based on which element we're looking for */
-        if(J_weight<K_weight)
-            L=I; L_weight = I_weight;
-        if(K_weight<I_weight)
-            R=J; R_weight = J_weight;
+        if(J_weight<K_weight) {
+            L=I;
+            L_weight = I_weight;
+        }
+        if(K_weight<I_weight) {
+            R=J;
+            R_weight = J_weight;
+        }
     }
 
     return A[L];
@@ -2211,10 +2216,14 @@ long long self_weighted_percentile(long long * A,
         } while (I <= J); /* Keep going until our pointers meet or pass */
 
         /* Re-adjust L and R, based on which element we're looking for */
-        if(J_weight<K_weight)
-            L=I; L_weight = I_weight;
-        if(K_weight<I_weight)
-            R=J; R_weight = J_weight;
+        if(J_weight<K_weight) {
+            L=I;
+            L_weight = I_weight;
+        }
+        if(K_weight<I_weight) {
+            R=J;
+            R_weight = J_weight;
+        }
     }
 
     return A[L];
@@ -2260,11 +2269,6 @@ static inline void update_summary(struct event_cycle_summary *s, long long c) {
         s->interval.cycles += c;
     }
     s->count++;
-}
-
-static inline void clear_interval_summary(struct event_cycle_summary *s) {
-    s->interval.count = 0;
-    s->interval.cycles = 0;
 }
 
 static inline void update_cycles(struct cycle_summary *s, long long c) {
@@ -2314,6 +2318,7 @@ static inline void clear_interval_cycles(struct interval_element *e) {
     e->instructions = 0;
 }
 
+#if 0
 static inline void update_cpi(struct weighted_cpi_summary *s,
                               unsigned long long i,
                               unsigned long long c) {
@@ -2359,6 +2364,7 @@ static inline void clear_interval_cpi(struct weighted_cpi_summary *s) {
     s->interval.count = 0;
     s->interval.instructions = 0;
 }
+#endif
 
 static inline void print_cpu_affinity(struct cycle_summary *s, char *p) {
     if(s->count) {
@@ -2639,29 +2645,29 @@ void interval_cr3_value_check(struct cr3_value_struct *cr3) {
     }
 }
 
+int cr3_time_compare(const void *_a, const void *_b) {
+    struct cr3_value_struct *a=*(typeof(&a))_a;
+    struct cr3_value_struct *b=*(typeof(&a))_b;
+
+    if(a->total_time.interval.cycles < b->total_time.interval.cycles)
+        return 1;
+    else if(b->total_time.interval.cycles == a->total_time.interval.cycles) {
+        if(a->total_time.interval.count < b->total_time.interval.count)
+            return 1;
+        else if(a->total_time.interval.count == b->total_time.interval.count)
+            return 0;
+        else
+            return -1;
+    } else
+        return -1;
+}
+
 void interval_cr3_schedule_ordered_output(void) {
     struct cr3_value_struct *p;
     int i;
 
     struct cr3_value_struct **qsort_array;
     int N=0;
-
-    int cr3_time_compare(const void *_a, const void *_b) {
-        struct cr3_value_struct *a=*(typeof(&a))_a;
-        struct cr3_value_struct *b=*(typeof(&a))_b;
-
-        if(a->total_time.interval.cycles < b->total_time.interval.cycles)
-            return 1;
-        else if(b->total_time.interval.cycles == a->total_time.interval.cycles) {
-            if(a->total_time.interval.count < b->total_time.interval.count)
-                return 1;
-            else if(a->total_time.interval.count == b->total_time.interval.count)
-                return 0;
-            else
-                return -1;
-        } else
-            return -1;
-    }
 
     for(p=P.cr3.head; p; p=p->gnext)
         N++;
@@ -2958,6 +2964,23 @@ void update_eip(struct eip_list_struct **head, unsigned long long eip,
     update_summary(&p->summary, cycles);
 }
 
+int eip_compare(const void *_a, const void *_b) {
+    struct eip_list_struct *a=*(typeof(&a))_a;
+    struct eip_list_struct *b=*(typeof(&a))_b;
+
+    if(a->summary.cycles < b->summary.cycles)
+        return 1;
+    else if(b->summary.cycles == a->summary.cycles) {
+        if(a->summary.count < b->summary.count)
+            return 1;
+        else if(a->summary.count == b->summary.count)
+            return 0;
+        else
+            return -1;
+    } else
+        return -1;
+}
+
 void dump_eip(struct eip_list_struct *head) {
     struct eip_list_struct *p;
     int i;
@@ -2965,23 +2988,6 @@ void dump_eip(struct eip_list_struct *head) {
 
     struct eip_list_struct **qsort_array;
     int N=0;
-
-    int eip_compare(const void *_a, const void *_b) {
-        struct eip_list_struct *a=*(typeof(&a))_a;
-        struct eip_list_struct *b=*(typeof(&a))_b;
-
-        if(a->summary.cycles < b->summary.cycles)
-            return 1;
-        else if(b->summary.cycles == a->summary.cycles) {
-            if(a->summary.count < b->summary.count)
-                return 1;
-            else if(a->summary.count == b->summary.count)
-                return 0;
-            else
-                return -1;
-        } else
-            return -1;
-    }
 
     for(p=head; p; p=p->next)
     {
@@ -3541,12 +3547,56 @@ struct outstanding_ipi *find_vec(struct vlapic_struct *vla, int vec)
             o = vla->outstanding.list + i;
     }
 
-    if(!o->valid) {
+    if(o && !o->valid) {
         o->vec = vec;
         o->valid = 1;
     }
 
     return o;
+}
+
+void ipi_send(struct vcpu_data *ov, int vec)
+{
+    struct vlapic_struct *vla;
+    struct outstanding_ipi *o = NULL;
+
+    if(ov->runstate.state == RUNSTATE_LOST) {
+        if(opt.dump_all)
+            fprintf(warn, "%s: v%d in state RUNSTATE_LOST, not counting ipi\n",
+                    __func__, ov->vid);
+        return;
+    }
+
+    vla = &ov->vlapic;
+
+    o = find_vec(vla, vec);
+
+    if(!o)
+    {
+        fprintf(warn, "%s: Couldn't find an open slot!\n",
+                __func__);
+        return;
+    }
+
+    if(!o->first_tsc)
+        o->first_tsc = P.now;
+
+    if(opt.dump_all && o->count == 0 && o->injected)
+        printf(" [vla] Pre-injection\n");
+
+    o->count++;
+
+    if((opt.dump_all)
+#if 0
+       && (ov->runstate.state != RUNSTATE_RUNNING
+           || ov->hvm.vmexit_valid)
+#endif
+        )
+        printf(" [vla] d%dv%d vec %d state %s (outstanding ipis %d)\n",
+               ov->d->did, ov->vid,
+               o->vec,
+               runstate_name[ov->runstate.state],
+               o->count);
 }
 
 void hvm_vlapic_icr_handler(struct hvm_data *h)
@@ -3566,50 +3616,6 @@ void hvm_vlapic_icr_handler(struct hvm_data *h)
                 dest_shorthand:2;
         };
     } icr = { .val = m->data };
-
-    void ipi_send(struct vcpu_data *ov, int vec)
-    {
-        struct vlapic_struct *vla;
-        struct outstanding_ipi *o = NULL;
-
-        if(ov->runstate.state == RUNSTATE_LOST) {
-            if(opt.dump_all)
-                fprintf(warn, "%s: v%d in state RUNSTATE_LOST, not counting ipi\n",
-                        __func__, ov->vid);
-            return;
-        }
-
-        vla = &ov->vlapic;
-
-        o = find_vec(vla, vec);
-
-        if(!o)
-        {
-            fprintf(warn, "%s: Couldn't find an open slot!\n",
-                    __func__);
-            return;
-        }
-
-        if(!o->first_tsc)
-            o->first_tsc = P.now;
-
-        if(opt.dump_all && o->count == 0 && o->injected)
-            printf(" [vla] Pre-injection\n");
-
-        o->count++;
-
-        if((opt.dump_all)
-#if 0
-           && (ov->runstate.state != RUNSTATE_RUNNING
-               || ov->hvm.vmexit_valid)
-#endif
-            )
-            printf(" [vla] d%dv%d vec %d state %s (outstanding ipis %d)\n",
-                   ov->d->did, ov->vid,
-                   o->vec,
-                   runstate_name[ov->runstate.state],
-                   o->count);
-    }
 
     if(m->is_write) {
         if(opt.dump_all) {
@@ -4116,39 +4122,22 @@ void cr3_prealloc_unpin(struct vcpu_data *v, unsigned long long gmfn) {
                gmfn, cr3->prealloc_unpin.count);
 }
 
+int cr3_compare_start(const void *_a, const void *_b) {
+    struct cr3_value_struct *a=*(typeof(&a))_a;
+    struct cr3_value_struct *b=*(typeof(&a))_b;
+
+    if(a->first_time > b->first_time)
+        return 1;
+    else if(b->first_time == a->first_time)
+        return 0;
+    else
+        return -1;
+}
+
 void cr3_dump_list(struct cr3_value_struct *head){
     struct cr3_value_struct *p;
     struct cr3_value_struct **qsort_array;
     int i, N=0;
-
-    int cr3_compare_total(const void *_a, const void *_b) {
-        struct cr3_value_struct *a=*(typeof(&a))_a;
-        struct cr3_value_struct *b=*(typeof(&a))_b;
-
-        if(a->total_time.cycles < b->total_time.cycles)
-            return 1;
-        else if(b->total_time.cycles == a->total_time.cycles) {
-            if(a->total_time.count < b->total_time.count)
-                return 1;
-            else if(a->total_time.count == b->total_time.count)
-                return 0;
-            else
-                return -1;
-        } else
-            return -1;
-    }
-
-    int cr3_compare_start(const void *_a, const void *_b) {
-        struct cr3_value_struct *a=*(typeof(&a))_a;
-        struct cr3_value_struct *b=*(typeof(&a))_b;
-
-        if(a->first_time > b->first_time)
-            return 1;
-        else if(b->first_time == a->first_time)
-            return 0;
-        else
-            return -1;
-    }
 
     if(!head)
         return;
@@ -4156,9 +4145,6 @@ void cr3_dump_list(struct cr3_value_struct *head){
     /* Count the number of elements */
     for(p=head; p; p=p->next)
         N++;
-
-    if(!N)
-        return;
 
     /* Alloc a struct of the right size */
     qsort_array = malloc(N * sizeof(struct eip_list_struct *));
@@ -9042,7 +9028,7 @@ void progress_init(void) {
         opt.progress = 0;
     }
 
-    if( (G.progress.out = fdopen(G.progress.pipe[1], "w")) < 0 ) {
+    if( (G.progress.out = fdopen(G.progress.pipe[1], "w")) == NULL ) {
         fprintf(stderr, "%s: could not fdopen pipe: %s, disabling progress bar\n",
                 __func__, strerror(errno));
         opt.progress = 0;

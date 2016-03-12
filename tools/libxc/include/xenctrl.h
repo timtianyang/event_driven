@@ -1084,7 +1084,7 @@ xc_cpumap_t xc_cpupool_freeinfo(xc_interface *xch);
  */
 
 /* A port identifier is guaranteed to fit in 31 bits. */
-typedef int evtchn_port_or_error_t;
+typedef int xc_evtchn_port_or_error_t;
 
 /**
  * This function allocates an unbound port.  Ports are named endpoints used for
@@ -1100,7 +1100,7 @@ typedef int evtchn_port_or_error_t;
  * @parm remote_dom the ID of the domain who will later bind
  * @return allocated port (in @dom) on success, -1 on failure
  */
-evtchn_port_or_error_t
+xc_evtchn_port_or_error_t
 xc_evtchn_alloc_unbound(xc_interface *xch,
                         uint32_t dom,
                         uint32_t remote_dom);
@@ -2076,17 +2076,6 @@ int xc_set_mem_access(xc_interface *xch, domid_t domain_id,
  */
 int xc_get_mem_access(xc_interface *xch, domid_t domain_id,
                       uint64_t pfn, xenmem_access_t *access);
-
-/*
- * Instructions causing a mem_access violation can be emulated by Xen
- * to progress the execution without having to relax the mem_access
- * permissions.
- * This feature has to be first enabled, then in the vm_event
- * response to a mem_access event it can be indicated if the instruction
- * should be emulated.
- */
-int xc_mem_access_enable_emulate(xc_interface *xch, domid_t domain_id);
-int xc_mem_access_disable_emulate(xc_interface *xch, domid_t domain_id);
 
 /***
  * Monitor control operations.

@@ -27,6 +27,7 @@ xenforeignmemory_handle *xenforeignmemory_open(xentoollog_logger *logger,
 
     if (!fmem) return NULL;
 
+    fmem->fd = -1;
     fmem->logger = logger;
     fmem->logger_tofree = NULL;
 
@@ -78,7 +79,7 @@ void *xenforeignmemory_map(xenforeignmemory_handle *fmem,
 
     ret = osdep_xenforeignmemory_map(fmem, dom, prot, num, arr, err);
 
-    if ( ret == 0 && err_to_free )
+    if ( ret && err_to_free )
     {
         int i;
 

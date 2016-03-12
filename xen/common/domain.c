@@ -270,6 +270,8 @@ struct domain *domain_create(domid_t domid, unsigned int domcr_flags,
 
     d->domain_id = domid;
 
+    TRACE_1D(TRC_DOM0_DOM_ADD, d->domain_id);
+
     lock_profile_register_struct(LOCKPROF_TYPE_PERDOM, d, domid, "Domain");
 
     if ( (err = xsm_alloc_security_domain(d)) != 0 )
@@ -857,20 +859,18 @@ static void complete_domain_destroy(struct rcu_head *head)
 void domain_destroy(struct domain *d)
 {
     struct domain **pd;
-    atomic_t old = ATOMIC_INIT(0);
-    atomic_t new = ATOMIC_INIT(DOMAIN_DESTROYED);
 
     BUG_ON(!d->is_dying);
 
     /* May be already destroyed, or get_domain() can race us. */
-    old = atomic_compareandswap(old, new, &d->refcnt);
-    if ( _atomic_read(old) != 0 )
+    if ( atomic_cmpxchg(&d->refcnt, 0, DOMAIN_DESTROYED) != 0 )
         return;
+
+    TRACE_1D(TRC_DOM0_DOM_REM, d->domain_id);
 
     cpupool_rm_domain(d);
 
     /* Delete from task list and task hashtable. */
-    TRACE_1D(TRC_SCHED_DOM_REM, d->domain_id);
     spin_lock(&domlist_update_lock);
     pd = &domain_list;
     while ( *pd != d ) 
@@ -1074,7 +1074,10 @@ int domain_soft_reset(struct domain *d)
     grant_table_warn_active_grants(d);
 
     for_each_vcpu ( d, v )
+    {
+        set_xen_guest_handle(runstate_guest(v), NULL);
         unmap_vcpu_info(v);
+    }
 
     rc = arch_domain_soft_reset(d);
     if ( !rc )
