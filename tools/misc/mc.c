@@ -173,7 +173,7 @@ int main(int argc, char* argv[]){
         printf("d_r = %s\n",s);
         params[i].disable_released = atoi(s =( (tmp = ezxml_child(changed_v, "disable_released")) == NULL ? MC_NO: MC_YES) );
         printf("d_l = %s\n",s);
-        params[i].disable_not_released = atoi(s =( (tmp = ezxml_child(changed_v, "disable_not_released")) == NULL ? MC_NO: MC_YES) );
+        params[i].disable_not_released = atoi(s =( (tmp = ezxml_child(changed_v, "disable_not_released")) == NULL ? MC_YES: MC_NO) );
         printf("d_n = %s\n",s);
     }
 

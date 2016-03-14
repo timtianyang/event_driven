@@ -1228,7 +1228,6 @@ __runq_pick(const struct scheduler *ops, const cpumask_t *mask)
  * when mode change is finished, it cleans up
  * all the lists and states
  */
-/*
 static void
 mode_change_over(const struct scheduler *ops)
 {
@@ -1246,7 +1245,7 @@ mode_change_over(const struct scheduler *ops)
         list_for_each_safe( iter, temp, lists[i] )
         {
             struct rt_vcpu* svc = __type_elem(iter);
-            rt_dump_vcpu(ops, svc);
+           // rt_dump_vcpu(ops, svc);
         // taken off runq/replq inside
             __type_remove(svc);
         }
@@ -1255,7 +1254,6 @@ mode_change_over(const struct scheduler *ops)
     rtds_mc.in_trans = 0;
     printk("mc took %"PRI_stime"\n", NOW() - rtds_mc.recv); 
 }
-*/
 
 /*
  * schedule function for rt scheduler.
@@ -1298,8 +1296,12 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
         if( rtds_mc.in_trans )
         {
             printk("in trans..\n");
-/* off-set for disabling old/changed vcpus */
+/* Disabling old/changed vcpus */
             
+
+
+
+
             /* guard to disable all at once for idle time proto */
             //else if ( 0 &&_runq_empty(ops) && scurr->cur_budget == 0)
            // {
@@ -1365,8 +1367,10 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
                     printk("async mc finished...\n");
                 }
             }*/
+            mode_change_over(ops);
         }
 /* mode change over */
+
 
         snext = __runq_pick(ops, cpumask_of(cpu));
         if ( snext == NULL )
@@ -1744,8 +1748,8 @@ rt_dom_cntl(
                     svc->active = 0;
                     printk("vcpu%d is new ", svc->vcpu->vcpu_id);
                 
-                    svc->period = svc->new_param.period;
-                    svc->budget = svc->new_param.budget;
+                    //svc->period = svc->new_param.period;
+                    //svc->budget = svc->new_param.budget;
                     printk(" -p%d -b%d\n",svc->new_param.period,svc->new_param.budget);
 
                     list_add_tail(&svc->type_elem, &rtds_mc.new_vcpus);
@@ -1812,7 +1816,7 @@ rt_dom_cntl(
 
         printk("\n");
 
-        //rtds_mc.in_trans = 1;
+        rtds_mc.in_trans = 1;
         rtds_mc.recv = NOW();
         printk("MC rev: %"PRI_stime"\n", rtds_mc.recv);
     out:
