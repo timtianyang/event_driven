@@ -356,6 +356,11 @@ typedef struct xen_domctl_schedparam_vcpu {
     xen_domctl_sched_rtds_t rtds;
     uint16_t vcpuid;
     uint16_t type;
+    int64_t ofst_new;
+    int64_t ofst_old;
+    uint16_t disable_running;
+    uint16_t disable_released;
+    uint16_t disable_not_released;
     #define OLD 0
     #define NEW 1
     #define CHANGED 2
@@ -370,12 +375,8 @@ typedef struct mode_change_info {
     uint32_t nr_changed;
     uint32_t nr_unchanged;
     /* protocol specific */
-    uint64_t ofst_old;
-    uint64_t ofst_new;
 
     uint64_t guard_old; /* disable all old vcpus */
-    uint64_t peri;
-    uint64_t sync;
 } mode_change_info_t;
 
 /* Set or get info? */
