@@ -198,6 +198,7 @@ struct rt_vcpu {
     unsigned flags;             /* mark __RTDS_scheduled, etc.. */
     
     /* mode change stuff */
+    unsigned crit;              /* criticality */
     unsigned active;            /* if active in mode change */
     unsigned type;              /* old only, new only, unchanged, changed */
     unsigned mode;              /* for changed vcpu only. 0:old mode, 1:new mode */
@@ -519,7 +520,7 @@ __type_remove(struct rt_vcpu *svc)
  * An utility function that inserts a vcpu to a
  * queue based on certain order (EDF). The returned
  * value is 1 if a vcpu has been inserted to the
- * front of a list
+ * front of a list.
  */
 static int
 deadline_queue_insert(struct rt_vcpu * (*_get_q_elem)(struct list_head *elem),
@@ -542,6 +543,34 @@ deadline_queue_insert(struct rt_vcpu * (*_get_q_elem)(struct list_head *elem),
 }
 
 /*
+ * A utility function that inserts a vcpu to a
+ * queue based on 1: criticality, 2: deadline.
+ * The returned value is 1 if a vcpu has been
+ * inserted to the front of a list. 
+ */
+static int
+critical_queue_insert(struct rt_vcpu * (*_get_q_elem)(struct list_head *elem),
+    struct rt_vcpu *svc, struct list_head *elem, struct list_head *queue)
+{
+    struct list_head *iter;
+    int pos = 0;
+
+    list_for_each ( iter, queue )
+    {
+        struct rt_vcpu * iter_svc = (*_get_q_elem)(iter);
+        if ( svc->crit > iter_svc->crit ||
+                svc->cur_deadline <= iter_svc->cur_deadline )
+            break;
+
+        pos++;
+    }
+
+    list_add_tail(elem, iter);
+    return !pos;
+}
+
+
+/*
  * Insert svc with budget in RunQ according to EDF:
  * vcpus with smaller deadlines go first.
  * Insert svc without budget in DepletedQ unsorted;
@@ -559,7 +588,7 @@ __runq_insert(const struct scheduler *ops, struct rt_vcpu *svc)
     ASSERT( vcpu_on_replq(svc) );
     /* add svc to runq if svc still has budget */
     if ( svc->cur_budget > 0 )
-        deadline_queue_insert(&__q_elem, svc, &svc->q_elem, runq);
+        critical_queue_insert(&__q_elem, svc, &svc->q_elem, runq);
     else
         list_add(&svc->q_elem, &prv->depletedq);
 }
@@ -1017,7 +1046,8 @@ rt_alloc_vdata(const struct scheduler *ops, struct vcpu *vc, void *dd)
     if ( !is_idle_vcpu(vc) )
     {
         svc->budget = RTDS_DEFAULT_BUDGET;
-        svc->active = 1; 
+        svc->active = 1;
+        svc->crit = 0;
     }
 
     SCHED_STAT_CRANK(vcpu_alloc);
