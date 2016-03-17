@@ -902,7 +902,7 @@ burn_budget(const struct scheduler *ops, struct rt_vcpu *svc, s_time_t now)
     if ( svc->cur_budget <= 0 )
     {
         svc->cur_budget = 0;
-        set_bit(__RTDS_depleted, &svc->flags);
+        __set_bit(__RTDS_depleted, &svc->flags);
     }
 
     /* TRACE */
@@ -1021,7 +1021,7 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
     if ( snext != scurr &&
          !is_idle_vcpu(current) &&
          vcpu_runnable(current) )
-        set_bit(__RTDS_delayed_runq_add, &scurr->flags);
+        __set_bit(__RTDS_delayed_runq_add, &scurr->flags);
 
     snext->last_start = now;
     ret.time =  -1; /* if an idle vcpu is picked */
@@ -1030,7 +1030,7 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
         if ( snext != scurr )
         {
             __q_remove(snext);
-            set_bit(__RTDS_scheduled, &snext->flags);
+            __set_bit(__RTDS_scheduled, &snext->flags);
         }
         if ( snext->vcpu->processor != cpu )
         {
@@ -1064,7 +1064,7 @@ rt_vcpu_sleep(const struct scheduler *ops, struct vcpu *vc)
         replq_remove(ops, svc);
     }
     else if ( svc->flags & RTDS_delayed_runq_add )
-        clear_bit(__RTDS_delayed_runq_add, &svc->flags);
+        __clear_bit(__RTDS_delayed_runq_add, &svc->flags);
 }
 
 /*
@@ -1206,7 +1206,7 @@ rt_vcpu_wake(const struct scheduler *ops, struct vcpu *vc)
      */
     if ( unlikely(svc->flags & RTDS_scheduled) )
     {
-        set_bit(__RTDS_delayed_runq_add, &svc->flags);
+        __set_bit(__RTDS_delayed_runq_add, &svc->flags);
         /*
          * The vcpu is waking up already, and we didn't even had the time to
          * remove its next replenishment event from the replenishment queue
@@ -1237,12 +1237,12 @@ rt_context_saved(const struct scheduler *ops, struct vcpu *vc)
     struct rt_vcpu *svc = rt_vcpu(vc);
     spinlock_t *lock = vcpu_schedule_lock_irq(vc);
 
-    clear_bit(__RTDS_scheduled, &svc->flags);
+    __clear_bit(__RTDS_scheduled, &svc->flags);
     /* not insert idle vcpu to runq */
     if ( is_idle_vcpu(vc) )
         goto out;
 
-    if ( test_and_clear_bit(__RTDS_delayed_runq_add, &svc->flags) &&
+    if ( __test_and_clear_bit(__RTDS_delayed_runq_add, &svc->flags) &&
          likely(vcpu_runnable(vc)) )
     {
         __runq_insert(ops, svc);
@@ -1369,7 +1369,7 @@ static void repl_timer_handler(void *data){
                 runq_tickle(ops, next_on_runq);
         }
         else if ( __vcpu_on_q(svc) &&
-                  test_and_clear_bit(__RTDS_depleted, &svc->flags) )
+                  __test_and_clear_bit(__RTDS_depleted, &svc->flags) )
             runq_tickle(ops, svc);
 
         list_del(&svc->replq_elem);
