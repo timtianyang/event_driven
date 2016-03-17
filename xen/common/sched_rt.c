@@ -621,7 +621,6 @@ static void
 replq_reinsert(const struct scheduler *ops, struct rt_vcpu *svc)
 {
     struct list_head *replq = rt_replq(ops);
-    struct rt_private *prv = rt_priv(ops);
     struct rt_vcpu *rearm_svc = svc;
     bool_t rearm = 0;
 
