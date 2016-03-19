@@ -9,21 +9,7 @@
 #define MC_ZERO "0"
 #define MC_NO "0"
 #define MC_YES "1"
-/*
- * Privimitives:
- * offset_new: Time between MCR and releasing vcpus in the new mode.
- *  + default = 0
- * offset_old: Time between MCR and disabling vcpus in the old mode.
- *  + default = 0
 
- * disable_running: Can the vcpu be disabled while running?
- *  + default = False
- * disable_released: Can the vcpu be disabled while on run queue?
- *  + default = False
- * disable_released: Can the vcpu be disabled while not runnable?
- *  + default = True
-
- */
 int main(int argc, char* argv[]){
     static mode_change_info_t info;
 
@@ -47,23 +33,9 @@ int main(int argc, char* argv[]){
         return 0;
     }
     domid = atoi(s);
-
-/*
-    s = ezxml_attr(xml,"sync");
-
-    if(s != NULL)
-        sync = atoi(s);
-
-    s = ezxml_attr(xml,"peri");
-
-    if(s != NULL)
-        peri = atoi(s);
-*/
     printf("domain=%d\n",domid);
 
     info.domid = domid;
-    //info.ofst_old = old_offset;
-    //info.ofst_new = new_offset;
     info.guard_old = 0;
 
     printf("new vcpus:\n");

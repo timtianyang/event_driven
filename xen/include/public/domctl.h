@@ -352,19 +352,62 @@ typedef struct xen_domctl_sched_rtds {
     uint32_t budget;
 } xen_domctl_sched_rtds_t;
 
+typedef struct xen_domctl_sched_guard {
+    int64_t t_from_MCR;
+    int64_t t_from_last_release; /* used in timer */
+
+    struct {
+        int64_t budget_thr;
+        int16_t comp; /* 0 = 1 <= 2 >= */
+    } b_comp;
+
+    struct {
+        /*
+         * for changed vcpus
+         * 0: use old period for release
+         * 1: use new period for release
+         */
+        int16_t action_p0_small; 
+        int16_t action_p1_small;
+    } p_comp;
+
+    struct {
+        /*
+         * runqueue length comparision
+         * 0: = 1 :<= 2 :>=
+         */
+        uint16_t len;
+        int16_t comp;
+    } buf_comp;
+} xen_domctl_sched_guard_t;
+
 typedef struct xen_domctl_schedparam_vcpu {
     xen_domctl_sched_rtds_t rtds;
     uint16_t vcpuid;
     uint16_t type;
-    int64_t ofst_new;
-    int64_t ofst_old;
-    uint16_t disable_running;
-    uint16_t disable_released;
-    uint16_t disable_not_released;
     #define OLD 0
     #define NEW 1
     #define CHANGED 2
     #define UNCHANGED 3
+
+    uint16_t action_running_old;
+    /* 1 is continue, 0 is abort */
+
+    uint16_t action_not_running_old;
+    /* 1 is continue, 0 is use guard */
+
+    /*
+     * 0: time from MCR
+     * 1: timer triggered from MCR to change/disable/release
+     * 2: remaining budget comparision
+     * 3: old/new period comparision
+     * 4: backlog threshold comparision
+     */
+    uint16_t guard_old_type;
+    uint16_t guard_new_type;
+
+    xen_domctl_sched_guard_t guard_old;
+    xen_domctl_sched_guard_t guard_new;
 } xen_domctl_schedparam_t;
 DEFINE_XEN_GUEST_HANDLE(xen_domctl_schedparam_t);
 
