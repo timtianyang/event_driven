@@ -355,10 +355,12 @@ typedef struct xen_domctl_sched_rtds {
 typedef struct xen_domctl_sched_guard {
     int64_t t_from_MCR;
     int64_t t_from_last_release; /* used in timer */
-
+#define MC_LARGER_THAN 1
+#define MC_SMALLER_THAN 2
+#define MC_EQUAL_TO 3
     struct {
         int64_t budget_thr;
-        int16_t comp; /* 0 = 1 <= 2 >= */
+        int16_t comp;
     } b_comp;
 
     struct {
@@ -367,15 +369,13 @@ typedef struct xen_domctl_sched_guard {
          * 0: use old period for release
          * 1: use new period for release
          */
-        int16_t action_p0_small; 
-        int16_t action_p1_small;
+#define MC_USE_OLD 1
+#define MC_USE_NEW 2
+        int16_t action_old_small; 
+        int16_t action_new_small;
     } p_comp;
 
     struct {
-        /*
-         * runqueue length comparision
-         * 0: = 1 :<= 2 :>=
-         */
         uint16_t len;
         int16_t comp;
     } buf_comp;
@@ -390,12 +390,20 @@ typedef struct xen_domctl_schedparam_vcpu {
     #define CHANGED 2
     #define UNCHANGED 3
 
+#define MC_ABORT 1
+#define MC_CONTINUE 2
+#define MC_USE_GUARD 3
     uint16_t action_running_old;
-    /* 1 is continue, 0 is abort */
+    /* 3 use guard, 2 is continue, 1 is abort */
 
     uint16_t action_not_running_old;
-    /* 1 is continue, 0 is use guard */
+    /* 2 is continue, 1 is use guard */
 
+#define MC_TIME_FROM_MCR 0
+#define MC_TIMER_FROM_LAST_RELEASE 1
+#define MC_BUDGET 2
+#define MC_PERIOD 3
+#define MC_BACKLOG 4
     /*
      * 0: time from MCR
      * 1: timer triggered from MCR to change/disable/release
@@ -413,13 +421,8 @@ DEFINE_XEN_GUEST_HANDLE(xen_domctl_schedparam_t);
 
 typedef struct mode_change_info {
     uint32_t domid;
-    uint32_t nr_new;
-    uint32_t nr_old;
-    uint32_t nr_changed;
-    uint32_t nr_unchanged;
+    uint32_t nr_vcpus;
     /* protocol specific */
-
-    uint64_t guard_old; /* disable all old vcpus */
 } mode_change_info_t;
 
 /* Set or get info? */

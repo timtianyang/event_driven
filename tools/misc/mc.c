@@ -10,6 +10,244 @@
 #define MC_NO "0"
 #define MC_YES "1"
 
+void error(void){
+    exit(1);
+}
+
+ezxml_t get_child(ezxml_t parent, const char* child_name)
+{
+    ezxml_t temp = ezxml_child(parent, child_name);
+    if( temp == NULL )
+    {
+        printf("error fetching %s\n",child_name);
+        error();
+    }
+    return temp;
+}
+
+const char* get_attr(ezxml_t parent, const char* attr_name)
+{
+    const char* temp = ezxml_attr(parent, attr_name);
+    if( temp == NULL )
+    {
+        printf("error fetching %s\n", attr_name);
+        error();
+    }
+    return temp;
+}
+
+/*
+ * sets the comparison guard using a parent tag
+ */
+void set_guard_comp(xen_domctl_sched_guard_t* cur_guard, ezxml_t parent, int type)
+{
+    ezxml_t temp;
+
+    switch (type)
+    {
+        case MC_BUDGET: 
+            temp = get_child(parent, "budget");
+            cur_guard->b_comp.budget_thr = atoi(temp->txt);
+            temp = get_child(parent, "comp");
+            if(strcmp(temp->txt, ">=") == 0)
+                cur_guard->b_comp.comp = MC_LARGER_THAN;
+            else if (strcmp(temp->txt, "<=") == 0)
+                cur_guard->b_comp.comp = MC_SMALLER_THAN;
+            else if (strcmp(temp->txt, "=") == 0)
+                cur_guard->b_comp.comp = MC_EQUAL_TO;
+            else
+            {
+                printf("unknown comparator %s\n",temp->txt);
+                error();
+            }
+            printf("budget comp %s %ld\n",temp->txt, cur_guard->b_comp.budget_thr);
+            break;
+        case MC_BACKLOG:
+            temp = get_child(parent, "size");
+            cur_guard->buf_comp.len = atoi(temp->txt);
+            temp = get_child(parent, "comp");
+            if(strcmp(temp->txt, ">=") == 0)
+                cur_guard->buf_comp.comp = MC_LARGER_THAN;
+            else if (strcmp(temp->txt, "<=") == 0)
+                cur_guard->buf_comp.comp = MC_SMALLER_THAN;
+            else if (strcmp(temp->txt, "=") == 0)
+                cur_guard->buf_comp.comp = MC_EQUAL_TO;
+            else
+            {
+                printf("unknown comparator %s\n",temp->txt);
+                error();
+            }
+            printf("backlog comp %s %d\n",temp->txt, cur_guard->buf_comp.len);
+            break;
+    }            
+}
+
+int get_guard_type(const char* type)
+{
+    if(strcmp(type, "time") == 0)
+        return MC_TIME_FROM_MCR;
+    if (strcmp(type, "timer") == 0 )
+        return MC_TIMER_FROM_LAST_RELEASE;
+    if (strcmp(type, "budget") == 0)
+        return MC_BUDGET;
+    if (strcmp(type, "period") == 0)
+        return MC_PERIOD;
+    if (strcmp(type, "backlog") == 0)
+        return MC_BACKLOG;
+    printf("unrecognized guard type %s\n", type);
+    error();
+    return -1;
+}
+/*
+ * old_new: 0 ->old 1->new
+ * parent must be a pointer to the guard tag
+ */
+void set_vcpu_guard(xen_domctl_schedparam_t* cur, int old_new, int type, ezxml_t parent)
+{
+    ezxml_t temp;
+    xen_domctl_sched_guard_t* cur_guard;
+    cur_guard = (old_new == 0) ? &cur->guard_old:
+                                 &cur->guard_new;
+
+    switch (type)
+    {
+        case MC_TIME_FROM_MCR:
+            if(!old_new)
+                cur->guard_old_type = MC_TIME_FROM_MCR;
+            else
+                cur->guard_new_type = MC_TIME_FROM_MCR;
+            temp = get_child(parent, "time");
+            cur_guard->t_from_MCR = atoi(temp->txt);
+
+            printf("time from mcr %ld\n",cur_guard->t_from_MCR);
+            break;
+        case MC_TIMER_FROM_LAST_RELEASE:
+            if(!old_new)
+                cur->guard_old_type = MC_TIMER_FROM_LAST_RELEASE;
+            else
+                cur->guard_new_type = MC_TIMER_FROM_LAST_RELEASE; 
+            temp = get_child(parent, "timer");
+            cur_guard->t_from_last_release = atoi(temp->txt);
+            printf("timer from last %ld\n",cur_guard->t_from_last_release);
+            break;
+        case MC_BUDGET:
+            if(!old_new)
+                cur->guard_old_type = MC_BUDGET;
+            else
+                cur->guard_new_type = MC_BUDGET;
+            set_guard_comp(cur_guard, parent, MC_BUDGET);
+            break;
+        case MC_PERIOD:
+            if(!old_new)
+                cur->guard_old_type = MC_PERIOD;
+            else
+                cur->guard_new_type = MC_PERIOD;
+
+            temp = get_child(parent, "old_smaller");
+            if(strcmp(temp->txt, "old") == 0)
+            {
+                cur_guard->p_comp.action_old_small = MC_USE_OLD;
+                printf("period: action old smaller use old\n");
+            }
+            else if (strcmp(temp->txt, "new") == 0)
+            {
+                cur_guard->p_comp.action_old_small = MC_USE_NEW;
+                printf("period: action old smaller use new\n");
+            }
+            else
+            {
+                printf("unknown action %s\n",temp->txt);
+                error();
+            }
+            temp = get_child(parent, "new_smaller");
+            if(strcmp(temp->txt, "old") == 0)
+            {
+                cur_guard->p_comp.action_new_small = MC_USE_OLD;
+                printf("period: action new smaller use old\n");
+            }
+            else if (strcmp(temp->txt, "new") == 0)
+            {
+                cur_guard->p_comp.action_new_small = MC_USE_NEW;
+                printf("period: action new smaller use new\n");
+            }
+            else
+            {
+                printf("unknown action %s\n",temp->txt);
+                error();
+            }
+            break;
+        case MC_BACKLOG:
+            if(!old_new)
+                cur->guard_old_type = MC_BACKLOG;
+            else
+                cur->guard_new_type = MC_BACKLOG; 
+
+            set_guard_comp(cur_guard, parent, MC_BACKLOG);
+            break;
+        default:
+            printf("unknow guard type: %d\n",type);
+            error();
+    }
+}
+
+/*
+ * set a vcpu's action to disable old, v is the vcpu tag
+ */
+void set_vcpu_old_action(xen_domctl_schedparam_t *cur, ezxml_t v)
+{
+    ezxml_t tmp = get_child(v, "action_running_old");
+    if(strcmp(tmp->txt, "continue") == 0)
+    {
+        cur->action_running_old = MC_CONTINUE;
+        printf("action_running_old is continue\n");
+    }
+    else if(strcmp(tmp->txt, "abort") == 0)
+    {
+        cur->action_running_old = MC_ABORT;
+        printf("action_running_old is abort\n");
+    }
+    else
+    {
+        printf("unknow action for running_old\n");
+        error();
+    }
+
+    tmp = get_child(v, "action_not_running_old");
+    if(strcmp(tmp->txt, "continue") == 0)
+    {
+        cur->action_not_running_old = MC_CONTINUE;
+        printf("action_not_running_old is continue\n");
+    }
+    else if(strcmp(tmp->txt, "guard") == 0)
+    {
+        int old_guard_type;
+        cur->action_not_running_old = MC_USE_GUARD;
+        printf("action_not_running_old is use guard\n");
+        printf("guard_old:\n");
+        tmp = get_child(v, "guard_old");
+        old_guard_type = get_guard_type(get_attr(tmp, "type"));
+        set_vcpu_guard(cur, 0, old_guard_type, tmp);
+    }
+    else
+    {
+        printf("unknow action for not_running_old\n");
+        error();
+    }
+}
+
+/*
+ * set a vcpu's param for a new vcpu, v is the vcpu tag
+ */
+void set_vcpu_param(xen_domctl_schedparam_t *cur, ezxml_t v)
+{
+    ezxml_t tmp = get_child(v, "budget");
+    cur->rtds.budget = atoi(tmp->txt);
+    printf("b = %d ", cur->rtds.budget);
+    tmp = get_child(v, "period");
+    cur->rtds.period = atoi(tmp->txt);
+    printf("p = %d\n", cur->rtds.period);
+}
+
 int main(int argc, char* argv[]){
     static mode_change_info_t info;
 
@@ -17,8 +255,8 @@ int main(int argc, char* argv[]){
 
     xc_interface *xci; 
 
-    ezxml_t xml, new_v, old_v, changed_v, unchanged_v, tmp;
-    int i = 0, nr_vcpus;
+    ezxml_t xml, v, tmp, tmp2;
+    int i = 0, nr_vcpus = 0;
     int domid;
     const char* s; //tmp string
 
@@ -36,150 +274,74 @@ int main(int argc, char* argv[]){
     printf("domain=%d\n",domid);
 
     info.domid = domid;
-    info.guard_old = 0;
 
-    printf("new vcpus:\n");
-    for(new_v = ezxml_child(xml, "new_v"); new_v; new_v = new_v->next)
+    for(v = ezxml_child(xml, "vcpu"); v; v = v->next)
     {
-        info.nr_new++; 
-    }
-    for(old_v = ezxml_child(xml, "old_v"); old_v; old_v = old_v->next)
-    {
-        info.nr_old++;
-    }
-    for(changed_v = ezxml_child(xml, "changed_v"); changed_v; changed_v = changed_v->next)
-    {
-        info.nr_changed++;
-    }
-    for(unchanged_v = ezxml_child(xml, "unchanged_v"); unchanged_v; unchanged_v = unchanged_v->next)
-    {
-        info.nr_unchanged++;
+        info.nr_vcpus++; 
     }
 
-    nr_vcpus = info.nr_new + info.nr_old + info.nr_changed + info.nr_unchanged;
-    
+    printf("%d of vcpus specified in this file\n", info.nr_vcpus);
     /* done calculating size */
     params = malloc(sizeof(xen_domctl_schedparam_t) * nr_vcpus);
 
-    for(i = 0, new_v = ezxml_child(xml, "new_v"); new_v; new_v = new_v->next, i++)
+    /* iterating through all vcpus */
+    for(i = 0, v = ezxml_child(xml, "vcpu"); v; v = v->next, i++)
     {
-        
-        params[i].type = NEW;
-        
-        tmp = ezxml_child(new_v, "id");
-        
-        if(tmp == NULL)
+        int new_guard_type;
+        //int old_guard_type;
+        xen_domctl_schedparam_t *cur = params + i;
+
+        s = get_attr(v, "id");        
+        cur->vcpuid = atoi(s);
+        printf("vcpu %s is ", s);
+
+        s = get_attr(v, "type");
+        printf("%s\n",s);
+
+        if( strcmp(s,"new") == 0 )
+            cur->type = NEW;
+        else if( strcmp(s,"old") == 0 )
+            cur->type = OLD;
+        else if( strcmp(s,"changed") == 0 )
+            cur->type = CHANGED;
+        else if( strcmp(s,"unchanged") == 0 )
+            cur->type = UNCHANGED;
+
+        switch(cur->type)
         {
-            printf("id cannot be null\n");
-            goto error;
+            case NEW:
+                tmp = get_child(v, "release_new");
+                tmp = get_child(tmp, "guard_new");
+                new_guard_type = get_guard_type(get_attr(tmp, "type"));
+                printf("guard_new:\n");
+                set_vcpu_guard(cur, 1, new_guard_type, tmp);
+                set_vcpu_param(cur,v);
+                break;
+            case OLD:
+                tmp = get_child(v, "disable_old");
+                tmp2 = get_child(tmp, "action_running_old");
+                set_vcpu_old_action(cur,tmp);
+                break;
+            case CHANGED:
+            case UNCHANGED: /* fall through */
+                tmp = get_child(v, "disable_old");
+                tmp2 = get_child(tmp, "action_running_old");
+                set_vcpu_old_action(cur,tmp);
+                tmp = get_child(v, "release_new");
+                tmp = get_child(tmp, "guard_new");
+                printf("guard_new:\n");
+                new_guard_type = get_guard_type(get_attr(tmp, "type"));
+                set_vcpu_guard(cur, 1, new_guard_type, tmp);
+                break;
         }
-        s = tmp->txt;
-        params[i].vcpuid = atoi(s);
-        printf("vcpu id = %s\n", s);
-        params[i].rtds.period = atoi(s =( (tmp = ezxml_child(new_v, "period")) == NULL ? RTDS_PERIOD: tmp->txt ));
-        printf("p = %s\n", s);
-        params[i].rtds.budget = atoi(s =( (tmp = ezxml_child(new_v, "budget")) == NULL ? RTDS_BUDGET: tmp->txt) );
-        printf("b =i %s\n", s);
-        params[i].ofst_new = atoi(s =( (tmp = ezxml_child(new_v, "offset_new")) == NULL ? MC_ZERO: tmp->txt) );
-        printf("o_n = %s\n", s);
-        params[i].ofst_old = atoi(s =( (tmp = ezxml_child(new_v, "offset_old")) == NULL ? MC_ZERO: tmp->txt) );
-        printf("o_o = %s\n", s);
-        
-        params[i].disable_running = atoi(s =( (tmp = ezxml_child(new_v, "disable_running")) == NULL ? MC_NO: MC_YES) );
-        printf("d_r = %s\n",s);
-        params[i].disable_released = atoi(s =( (tmp = ezxml_child(new_v, "disable_released")) == NULL ? MC_NO: MC_YES) );
-        printf("d_l = %s\n",s);
-        params[i].disable_not_released = atoi(s =( (tmp = ezxml_child(new_v, "disable_not_released")) == NULL ? MC_YES: MC_NO) );
-        printf("d_n = %s\n",s);
+        printf("----\n");
     }
-
-    printf("\nold_vcpus:\n");
-    for(old_v = ezxml_child(xml, "old_v"); old_v; old_v = old_v->next, i++)
-    {
-        tmp = ezxml_child(old_v, "id");
-        if(tmp == NULL)
-        {
-            printf("id cannot be null\n");
-            goto error;
-        }
-        s = tmp->txt;
-        params[i].type = OLD;
-        params[i].vcpuid = atoi(s);
-        printf("vcpu id = %s\n", s);
-        params[i].ofst_new = atoi(s =( (tmp = ezxml_child(old_v, "offset_new")) == NULL ? MC_ZERO: tmp->txt) );
-        printf("o_n = %s\n", s);
-        params[i].ofst_old = atoi(s =( (tmp = ezxml_child(old_v, "offset_old")) == NULL ? MC_ZERO: tmp->txt) );
-        printf("o_o = %s\n", s);
-
-        params[i].disable_running = atoi(s =( (tmp = ezxml_child(old_v, "disable_running")) == NULL ? MC_NO: MC_YES) );
-        printf("d_r = %s\n",s);
-        params[i].disable_released = atoi(s =( (tmp = ezxml_child(old_v, "disable_released")) == NULL ? MC_NO: MC_YES) );
-        printf("d_l = %s\n",s);
-        params[i].disable_not_released = atoi(s =( (tmp = ezxml_child(old_v, "disable_not_released")) == NULL ? MC_YES: MC_NO) );
-        printf("d_n = %s\n",s);
-    }
-
-    printf("\nchanged_vcpus:\n");
-    for(changed_v = ezxml_child(xml, "changed_v"); changed_v; changed_v = changed_v->next, i++)
-    {
-        params[i].type = CHANGED;
-        tmp = ezxml_child(changed_v, "id");
-        if(tmp == NULL)
-        {
-            printf("id cannot be null\n");
-            goto error;
-        }
-        s = tmp->txt;
-        params[i].vcpuid = atoi(s);
-        printf("vcpi id = %s\n", s);
-        params[i].rtds.period = atoi(s =( (tmp = ezxml_child(changed_v, "period")) == NULL ? RTDS_PERIOD: tmp->txt) );
-        printf("p = %s\n", s);
-        params[i].rtds.budget = atoi(s =( (tmp = ezxml_child(changed_v, "budget")) == NULL ? RTDS_BUDGET: tmp->txt) );
-        printf("b = %s\n", s);
-        params[i].ofst_new = atoi(s =( (tmp = ezxml_child(changed_v, "offset_new")) == NULL ? MC_ZERO: tmp->txt) );
-        printf("o_n = %s\n", s);
-        params[i].ofst_old = atoi(s =( (tmp = ezxml_child(changed_v, "offset_old")) == NULL ? MC_ZERO: tmp->txt) );
-        printf("o_o = %s\n", s);
-        
-        params[i].disable_running = atoi(s =( (tmp = ezxml_child(changed_v, "disable_running")) == NULL ? MC_NO: MC_YES) );
-        printf("d_r = %s\n",s);
-        params[i].disable_released = atoi(s =( (tmp = ezxml_child(changed_v, "disable_released")) == NULL ? MC_NO: MC_YES) );
-        printf("d_l = %s\n",s);
-        params[i].disable_not_released = atoi(s =( (tmp = ezxml_child(changed_v, "disable_not_released")) == NULL ? MC_YES: MC_NO) );
-        printf("d_n = %s\n",s);
-    }
-
-    printf("\nunchanged_vcpus:\n");
-    for(unchanged_v = ezxml_child(xml, "unchanged_v"); unchanged_v; unchanged_v = unchanged_v->next, i++)
-    {
-        params[i].type = UNCHANGED;
-        tmp = ezxml_child(unchanged_v, "id");
-        if(tmp == NULL)
-        {
-            printf("id cannot be null\n");
-            goto error;
-        }
-        s = tmp->txt;
-        params[i].vcpuid = atoi(s);
-        printf("vcpu id = %s\n", s);
-        params[i].ofst_new = atoi(s =( (tmp = ezxml_child(unchanged_v, "offset_new")) == NULL ? MC_ZERO: tmp->txt) );
-        printf("o_n = %s\n", s);
-        params[i].ofst_old = atoi(s =( (tmp = ezxml_child(unchanged_v, "offset_old")) == NULL ? MC_ZERO: tmp->txt) );
-        printf("o_o = %s\n", s);
-
-        params[i].disable_running = atoi(s =( (tmp = ezxml_child(unchanged_v, "disable_running")) == NULL ? MC_NO: MC_YES));
-        printf("d_r = %s\n",s);
-        params[i].disable_released = atoi(s =( (tmp = ezxml_child(unchanged_v, "disable_released")) == NULL ? MC_NO: MC_YES));
-        printf("d_l = %s\n",s);
-        params[i].disable_not_released = atoi(s =( (tmp = ezxml_child(unchanged_v, "disable_not_released")) == NULL ? MC_YES: MC_NO));
-        printf("d_n = %s\n",s);
-    }
-
+    printf("+++++end of mc parsing+++++\n");
 
     i = fprintf(stderr, "%s", ezxml_error(xml));
     ezxml_free(xml);
 
-
+    printf("opening interface...\n");
     xci = xc_interface_open(NULL, NULL, 0);
 
     if ( !xci )
@@ -196,8 +358,5 @@ int main(int argc, char* argv[]){
 out:
     xc_interface_close(xci);
     printf("closed xc interface....\n");
-    return 0;
-error:
-    
     return 0;
 }

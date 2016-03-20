@@ -71,7 +71,7 @@ xc_sched_rtds_mc_set(
     xen_domctl_schedparam_t *params)
 {
     int rc;
-    int nr = info.nr_new + info.nr_old + info.nr_changed + info.nr_unchanged;
+    int nr = info.nr_vcpus;
     DECLARE_DOMCTL;
     DECLARE_HYPERCALL_BOUNCE(
         params,

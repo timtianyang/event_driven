@@ -1698,12 +1698,12 @@ rt_dom_cntl(
     struct vcpu *v;
     unsigned long flags;
     int rc = 0;
-    struct list_head *iter;
+    /*struct list_head *iter;
     xen_domctl_schedparam_t local_params;
     mode_change_info_t* mc;
     uint32_t index = 0;
     uint32_t len;
-
+*/
 
     switch ( op->cmd )
     {
@@ -1739,7 +1739,8 @@ rt_dom_cntl(
         spin_unlock_irqrestore(&prv->lock, flags);
         break;
 
-    case XEN_DOMCTL_SCHEDOP_putMC: 
+    case XEN_DOMCTL_SCHEDOP_putMC:
+        /*
         printk("rtds mode change info:\n");
         spin_lock_irqsave(&prv->lock, flags);
         mc = &(op->u.mode_change.info);
@@ -1811,13 +1812,13 @@ rt_dom_cntl(
 
         rtds_mc.info = *mc;
 
-        /*printk("This protocol is ");
-        printk(rtds_mc.info.sync == 1? "synchronous ":
-            "asynchronous ");
+        //printk("This protocol is ");
+        //printk(rtds_mc.info.sync == 1? "synchronous ":
+       //     "asynchronous ");
 
-        printk(rtds_mc.info.peri == 1? "with periodicity\n":
-            "without periodicity\n");
-        */
+        //printk(rtds_mc.info.peri == 1? "with periodicity\n":
+        //    "without periodicity\n");
+        
         
         printk("old vcpu info:\n");
         list_for_each( iter, &rtds_mc.old_vcpus )
@@ -1852,11 +1853,12 @@ rt_dom_cntl(
         rtds_mc.in_trans = 1;
         rtds_mc.recv = NOW();
         printk("MC rev: %"PRI_stime"\n", rtds_mc.recv);
+        
     out:
         spin_unlock_irqrestore(&prv->lock, flags);
-        /* invoke scheduler now */
+    // invoke scheduler now 
         cpu_raise_softirq(current->processor, SCHEDULE_SOFTIRQ);
-
+*/
         break;
     }
     return rc;
