@@ -129,6 +129,12 @@
 #define RTDS_depleted (1<<__RTDS_depleted)
 
 /*
+ * RTDS_on_runq
+ */
+#define __RTDS_on_runq      4
+#define RTDS_on_runq (1<<__RTDS_on_runq)
+
+/*
  * rt tracing events ("only" 512 available!). Check
  * include/public/trace.h for more details.
  */
@@ -158,6 +164,10 @@ static unsigned int nr_rt_ops;
 
 static void repl_timer_handler(void *data);
 
+static void mc_release_timer_handler(void *data);
+
+static void mc_abort_timer_handler(void *data);
+
 /*
  * Systme-wide private data, include global RunQueue/DepletedQ
  * Global lock is referenced by schedule_data.schedule_lock from all
@@ -171,6 +181,8 @@ struct rt_private {
     struct list_head replq;     /* ordered list of vcpus that need replenishment */
     cpumask_t tickled;          /* cpus been tickled */
     struct timer *repl_timer;   /* replenishment timer */
+
+    unsigned runq_len;          /* the backlog size, used in MCR */
 };
 
 /*
@@ -200,13 +212,15 @@ struct rt_vcpu {
     unsigned active;            /* if active in mode change */
     unsigned type;              /* old only, new only, unchanged, changed */
     unsigned mode;              /* for changed vcpu only. 0:old mode, 1:new mode */
-    unsigned disable_running;
-    unsigned disable_released;
-    unsigned disable_not_released;
-    s_time_t t_disable;             /* interval between MC and being disabled */
-    s_time_t t_enable;          /* interval between MC and being enabled */
-    struct xen_domctl_sched_rtds new_param;
+
+    const struct scheduler *ops; /* used in timer handler */
     struct list_head type_elem; /* on the type list */
+    struct list_head guard_elem; /* on a list of guards */
+
+    struct timer *mc_abort_timer; /* timer to handle action */ 
+    struct timer *mc_release_timer; /* timer to handle action */
+
+    xen_domctl_schedparam_t mc_param; /* MC paramters */
 };
 
 /*
@@ -218,7 +232,7 @@ struct rt_dom {
 };
 
 /* mode change related control vars */
-struct mode_change{
+struct mode_change {
     mode_change_info_t info;  /* mc protocol */
     unsigned in_trans;          /* if rtds is in transition */
     s_time_t recv;              /* when MCR was received */
@@ -227,6 +241,11 @@ struct mode_change{
     struct list_head unchanged_vcpus;
     struct list_head changed_vcpus;
 } rtds_mc;
+
+struct mc_helper {
+    const struct scheduler* ops;
+    struct rt_vcpu* svc;
+};
 
 /*
  * Useful inline functions
@@ -386,6 +405,8 @@ rt_dump(const struct scheduler *ops)
         rt_dump_vcpu(ops, svc);
     }
 
+    printk("Run Queue Length = %d ***********\n", prv->runq_len);
+
     printk("Global Replenishment Events info:\n");
     list_for_each( iter, replq )
     {
@@ -505,10 +526,12 @@ deadline_queue_insert(struct rt_vcpu * (*qelem)(struct list_head *),
   deadline_queue_insert(&replq_elem, ##__VA_ARGS__)
 
 static inline void
-__q_remove(struct rt_vcpu *svc)
+__q_remove(const struct scheduler *ops, struct rt_vcpu *svc)
 {
     ASSERT( __vcpu_on_q(svc) );
     list_del_init(&svc->q_elem);
+    if ( test_and_clear_bit(__RTDS_on_runq, &svc->flags) )
+        (rt_priv(ops)->runq_len)--;
 }
 
 static inline void
@@ -516,6 +539,13 @@ __type_remove(struct rt_vcpu *svc)
 {
     printk("remove vcpu%d from type\n", svc->vcpu->vcpu_id);
     list_del_init(&svc->type_elem);
+}
+
+static inline void
+guard_remove(struct rt_vcpu *svc)
+{
+    printk("remove vcpu%d guard\n", svc->vcpu->vcpu_id);
+    list_del_init(&svc->guard_elem);
 }
 
 static inline void
@@ -545,34 +575,6 @@ replq_remove(const struct scheduler *ops, struct rt_vcpu *svc)
 }
 
 /*
- * A utility function that inserts a vcpu to a
- * queue based on 1: criticality, 2: deadline.
- * The returned value is 1 if a vcpu has been
- * inserted to the front of a list. 
- */
-static int
-critical_queue_insert(struct rt_vcpu * (*qelem)(struct list_head *),
-    struct rt_vcpu *svc, struct list_head *elem, struct list_head *queue)
-{
-    struct list_head *iter;
-    int pos = 0;
-
-    list_for_each ( iter, queue )
-    {
-        struct rt_vcpu * iter_svc = (*qelem)(iter);
-        if ( svc->crit > iter_svc->crit ||
-                svc->cur_deadline <= iter_svc->cur_deadline )
-            break;
-
-        pos++;
-    }
-
-    list_add_tail(elem, iter);
-    return !pos;
-}
-
-
-/*
  * Insert svc with budget in RunQ according to EDF:
  * vcpus with smaller deadlines go first.
  * Insert svc without budget in DepletedQ unsorted;
@@ -590,7 +592,11 @@ __runq_insert(const struct scheduler *ops, struct rt_vcpu *svc)
     ASSERT( vcpu_on_replq(svc) );
     /* add svc to runq if svc still has budget */
     if ( svc->cur_budget > 0 )
-        critical_queue_insert(&__q_elem, svc, &svc->q_elem, runq);
+    {
+        deadline_runq_insert(svc, &svc->q_elem, runq);
+        (prv->runq_len)++;
+        set_bit(__RTDS_on_runq, &svc->flags);
+    }
     else
         list_add(&svc->q_elem, &prv->depletedq);
 }
@@ -881,6 +887,7 @@ rt_init(struct scheduler *ops)
     INIT_LIST_HEAD(&rtds_mc.new_vcpus);
     INIT_LIST_HEAD(&rtds_mc.unchanged_vcpus);
     INIT_LIST_HEAD(&rtds_mc.changed_vcpus);
+    prv->runq_len = 0;
 
     cpumask_clear(&prv->tickled);
 
@@ -941,7 +948,7 @@ rt_alloc_pdata(const struct scheduler *ops, int cpu)
         /* Allocate the timer on the first cpu of this pool. */
         prv->repl_timer = xzalloc(struct timer);
 
-        if ( prv->repl_timer == NULL )
+        if ( (prv->repl_timer == NULL) )
             return NULL;
 
         init_timer(prv->repl_timer, repl_timer_handler, (void *)ops, cpu);
@@ -1033,6 +1040,7 @@ static void *
 rt_alloc_vdata(const struct scheduler *ops, struct vcpu *vc, void *dd)
 {
     struct rt_vcpu *svc;
+    int cpu = smp_processor_id();
 
     /* Allocate per-VCPU info */
     svc = xzalloc(struct rt_vcpu);
@@ -1044,6 +1052,7 @@ rt_alloc_vdata(const struct scheduler *ops, struct vcpu *vc, void *dd)
 
     /* mode change */
     INIT_LIST_HEAD(&svc->type_elem);
+    INIT_LIST_HEAD(&svc->guard_elem);
 
     svc->flags = 0U;
     svc->sdom = dd;
@@ -1056,6 +1065,15 @@ rt_alloc_vdata(const struct scheduler *ops, struct vcpu *vc, void *dd)
         svc->budget = RTDS_DEFAULT_BUDGET;
         svc->active = 1;
         svc->crit = 0;
+        svc->ops = ops;
+        svc->mc_release_timer = xzalloc(struct timer);
+        svc->mc_abort_timer = xzalloc(struct timer);
+
+        if ( (svc->mc_abort_timer == NULL) )
+            return NULL;
+
+        init_timer(svc->mc_release_timer, mc_release_timer_handler, (void *)svc, cpu);
+        init_timer(svc->mc_abort_timer, mc_abort_timer_handler, (void *)svc, cpu);
     }
 
     SCHED_STAT_CRANK(vcpu_alloc);
@@ -1067,6 +1085,11 @@ static void
 rt_free_vdata(const struct scheduler *ops, void *priv)
 {
     struct rt_vcpu *svc = priv;
+
+    kill_timer(svc->mc_release_timer);
+    xfree(svc->mc_release_timer);
+    kill_timer(svc->mc_abort_timer);
+    xfree(svc->mc_abort_timer);
 
     xfree(svc);
 }
@@ -1119,7 +1142,7 @@ rt_vcpu_remove(const struct scheduler *ops, struct vcpu *vc)
 
     lock = vcpu_schedule_lock_irq(vc);
     if ( __vcpu_on_q(svc) )
-        __q_remove(svc);
+        __q_remove(ops, svc);
 
     if ( vcpu_on_replq(svc) )
         replq_remove(ops,svc);
@@ -1443,7 +1466,7 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
     {
         if ( snext != scurr )
         {
-            __q_remove(snext);
+            __q_remove(ops, snext);
             set_bit(__RTDS_scheduled, &snext->flags);
         }
         if ( snext->vcpu->processor != cpu )
@@ -1477,7 +1500,7 @@ rt_vcpu_sleep(const struct scheduler *ops, struct vcpu *vc)
     }
     else if ( __vcpu_on_q(svc) )
     {
-        __q_remove(svc);
+        __q_remove(ops, svc);
         replq_remove(ops, svc);
     }
     else if ( svc->flags & RTDS_delayed_runq_add )
@@ -1698,12 +1721,11 @@ rt_dom_cntl(
     struct vcpu *v;
     unsigned long flags;
     int rc = 0;
-    /*struct list_head *iter;
+    struct list_head *iter;
     xen_domctl_schedparam_t local_params;
     mode_change_info_t* mc;
     uint32_t index = 0;
     uint32_t len;
-*/
 
     switch ( op->cmd )
     {
@@ -1740,11 +1762,10 @@ rt_dom_cntl(
         break;
 
     case XEN_DOMCTL_SCHEDOP_putMC:
-        /*
         printk("rtds mode change info:\n");
         spin_lock_irqsave(&prv->lock, flags);
         mc = &(op->u.mode_change.info);
-        len = mc->nr_new + mc->nr_old + mc->nr_changed + mc->nr_unchanged;
+        len = mc->nr_vcpus;
         printk("total %d vcpus\n", len);
         for ( index = 0; index < len; index++ )
         {
@@ -1762,15 +1783,13 @@ rt_dom_cntl(
                 break;
             }
             svc = rt_vcpu(d->vcpu[local_params.vcpuid]);
-            svc->new_param = local_params.rtds;
-            svc->disable_running = local_params.disable_running;
-            printk("d_r=%d",svc->disable_running);
-            svc->disable_released = local_params.disable_released;
-            printk("d_l=%d",svc->disable_released);
-            svc->disable_not_released = local_params.disable_not_released;
-            printk("d_n=%d",svc->disable_not_released);
+
+            svc->mc_param = local_params;
             svc->active = 1;
-            switch (local_params.type)
+            svc->mode = 0;
+
+            printk("---------\n");
+            switch (svc->mc_param.type)
             {
                 case OLD:
                     svc->type = OLD;
@@ -1779,20 +1798,21 @@ rt_dom_cntl(
                     break;
                 case NEW:
                     svc->type = NEW;
-                    svc->active = 0;
+                    //svc->active = 0;
+
                     printk("vcpu%d is new ", svc->vcpu->vcpu_id);
-                
+                    
                     //svc->period = svc->new_param.period;
                     //svc->budget = svc->new_param.budget;
-                    printk(" -p%d -b%d\n",svc->new_param.period,svc->new_param.budget);
+                    printk(" -p%d -b%d\n",svc->mc_param.rtds.period,svc->mc_param.rtds.budget);
 
                     list_add_tail(&svc->type_elem, &rtds_mc.new_vcpus);
                     break;
                 case CHANGED:
                     svc->type = CHANGED;
-                    svc->mode = 0;
+
                     printk("vcpu%d is changed", svc->vcpu->vcpu_id);
-                    printk(" -p%d -b%d\n",svc->new_param.period,svc->new_param.budget);
+                    printk(" -p%d -b%d\n",svc->mc_param.rtds.period,svc->mc_param.rtds.budget);
 
                     list_add_tail(&svc->type_elem, &rtds_mc.changed_vcpus);
                     break;
@@ -1801,25 +1821,61 @@ rt_dom_cntl(
                     printk("vcpu%d is unchanged\n", svc->vcpu->vcpu_id);
                     list_add_tail(&svc->type_elem, &rtds_mc.unchanged_vcpus);
                     break;
-
             }
 
-            printk("ofst_new=%"PRIi64"\n", local_params.ofst_new);
-            svc->t_enable = local_params.ofst_new;
-            printk("ofst_old=%"PRIi64"\n", local_params.ofst_old);
-            svc->t_disable = local_params.ofst_old;
+            if ( svc->type != NEW )
+            {
+                printk("action_runnig_old: %d ", svc->mc_param.action_running_old);
+                printk("action_not_runnig_old: %d\n", svc->mc_param.action_not_running_old);
+                if ( svc->mc_param.action_not_running_old == MC_USE_GUARD )
+                printk("old guards:\n");
+                switch ( svc->mc_param.guard_old_type )
+                {
+                    case MC_TIME_FROM_MCR:
+                        printk("time guard\n");
+                        break;
+                    case MC_TIMER_FROM_LAST_RELEASE:
+                        printk("timer guard\n");
+                        break;
+                    case MC_BUDGET:
+                        printk("budget comp\n");
+                        break;
+                    case MC_PERIOD:
+                        printk("period comp\n");
+                        break;
+                    case MC_BACKLOG:
+                        printk("backlog comp\n");
+                        break;
+                }
+            }
+
+            if ( svc->type != OLD )
+            {
+                printk("new guards:\n");
+                switch ( svc->mc_param.guard_new_type )
+                {
+                    case MC_TIME_FROM_MCR:
+                        printk("time guard\n");
+                        break;
+                    case MC_TIMER_FROM_LAST_RELEASE:
+                        printk("timer guard\n");
+                        break;
+                    case MC_BUDGET:
+                        printk("budget comp\n");
+                        break;
+                    case MC_PERIOD:
+                        printk("period comp\n");
+                        break;
+                    case MC_BACKLOG:
+                        printk("backlog comp\n");
+                        break;
+                }
+            }
+            printk("---------\n");
         }
 
         rtds_mc.info = *mc;
 
-        //printk("This protocol is ");
-        //printk(rtds_mc.info.sync == 1? "synchronous ":
-       //     "asynchronous ");
-
-        //printk(rtds_mc.info.peri == 1? "with periodicity\n":
-        //    "without periodicity\n");
-        
-        
         printk("old vcpu info:\n");
         list_for_each( iter, &rtds_mc.old_vcpus )
         {
@@ -1850,15 +1906,14 @@ rt_dom_cntl(
 
         printk("\n");
 
-        rtds_mc.in_trans = 1;
+        //rtds_mc.in_trans = 1;
         rtds_mc.recv = NOW();
         printk("MC rev: %"PRI_stime"\n", rtds_mc.recv);
-        
+        mode_change_over(ops);
     out:
         spin_unlock_irqrestore(&prv->lock, flags);
     // invoke scheduler now 
         cpu_raise_softirq(current->processor, SCHEDULE_SOFTIRQ);
-*/
         break;
     }
     return rc;
@@ -1900,8 +1955,13 @@ static void repl_timer_handler(void *data){
 
         if ( __vcpu_on_q(svc) )
         {
-            __q_remove(svc);
+            __q_remove(ops, svc);
             __runq_insert(ops, svc);
+
+            /*
+             * if the vcpu was on runq already, re-insert shouldn't
+             * increment the count.
+             */
         }
     }
 
@@ -1941,6 +2001,30 @@ static void repl_timer_handler(void *data){
         set_timer(repl_timer, replq_elem(replq->next)->cur_deadline);
 
     spin_unlock_irq(&prv->lock);
+}
+
+/*
+ * mc_timer disable vcpus
+ */
+static void mc_abort_timer_handler(void *data){
+    struct rt_vcpu *svc = (struct rt_vcpu*)data;
+    const struct scheduler *ops = svc->ops;
+
+    __q_remove(ops, svc);
+}
+
+/*
+ * mc_timer enable vcpus
+ */
+static void mc_release_timer_handler(void *data){
+    s_time_t now = NOW();
+    struct rt_vcpu *svc = (struct rt_vcpu*)data;
+    const struct scheduler *ops = svc->ops;
+
+    if ( now >= svc->cur_deadline )
+        rt_update_deadline(now, svc);
+
+    __runq_insert(ops, svc);
 }
 
 static const struct scheduler sched_rtds_def = {

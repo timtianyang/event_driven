@@ -338,7 +338,6 @@ struct xen_domctl_max_vcpus {
 typedef struct xen_domctl_max_vcpus xen_domctl_max_vcpus_t;
 DEFINE_XEN_GUEST_HANDLE(xen_domctl_max_vcpus_t);
 
-
 /* XEN_DOMCTL_scheduler_op */
 /* Scheduler types. */
 /* #define XEN_SCHEDULER_SEDF  4 (Removed) */

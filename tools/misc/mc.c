@@ -322,8 +322,9 @@ int main(int argc, char* argv[]){
                 tmp2 = get_child(tmp, "action_running_old");
                 set_vcpu_old_action(cur,tmp);
                 break;
-            case CHANGED:
-            case UNCHANGED: /* fall through */
+            case CHANGED: /* fall through */
+                set_vcpu_param(cur,v);
+            case UNCHANGED:
                 tmp = get_child(v, "disable_old");
                 tmp2 = get_child(tmp, "action_running_old");
                 set_vcpu_old_action(cur,tmp);
@@ -338,8 +339,8 @@ int main(int argc, char* argv[]){
     }
     printf("+++++end of mc parsing+++++\n");
 
-    i = fprintf(stderr, "%s", ezxml_error(xml));
-    ezxml_free(xml);
+    i = fprintf(stderr, "%s\n", ezxml_error(xml));
+    //ezxml_free(xml);
 
     printf("opening interface...\n");
     xci = xc_interface_open(NULL, NULL, 0);
