@@ -1296,7 +1296,7 @@ mode_change_over(const struct scheduler *ops)
         &rtds_mc.unchanged_vcpus
     };
     int i;
-    printk("cleaning up:\n");
+//    printk("cleaning up:\n");
     for( i = 0; i< 4; i++)
     {
         list_for_each_safe( iter, temp, lists[i] )
@@ -1308,8 +1308,7 @@ mode_change_over(const struct scheduler *ops)
         }
 
     }
-    rtds_mc.in_trans = 0;
-    printk("mc took %"PRI_stime"\n", NOW() - rtds_mc.recv); 
+    rtds_mc.in_trans = 0; 
 }
 
 /*
@@ -1324,7 +1323,6 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
     struct rt_vcpu *const scurr = rt_vcpu(current);
     struct rt_vcpu *snext = NULL;
     struct task_slice ret = { .migrated = 0 };
-    static int count = 0;
     //struct list_head *iter,*temp;
 
     /* clear ticked bit now that we've been scheduled */
@@ -1333,102 +1331,13 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
     /* burn_budget would return for IDLE VCPU */
     burn_budget(ops, scurr, now);
 
-    if(rtds_mc.in_trans)
-    {    
-        printk("rt_sched:\nscurr = vcpu%d, %sactive type=%d %sidle bgt=%"PRI_stime" now=%"PRI_stime"\n", current->vcpu_id, scurr->active == 1? "":" not", scurr->type, is_idle_vcpu(scurr->vcpu)? "":"not ", scurr->budget, now);
-        count++;
-        if(count == 20)
-            rtds_mc.in_trans = 0;
-    }
     if ( tasklet_work_scheduled )
     {
         trace_var(TRC_RTDS_SCHED_TASKLET, 1, 0,  NULL);
         snext = rt_vcpu(idle_vcpu[cpu]);
-        if(rtds_mc.in_trans)
-            printk("tasklet shit\n");
     }
     else
     {
-        /* in transition */
-        if( rtds_mc.in_trans )
-        {
-            printk("in trans..\n");
-/* Disabling old/changed vcpus */
-            
-
-
-
-
-            /* guard to disable all at once for idle time proto */
-            //else if ( 0 &&_runq_empty(ops) && scurr->cur_budget == 0)
-           // {
-          //      printk("guard for idle time satisfied\n");
-                
-           // }
-            //else
-                //printk("not ready to disable old.%"PRI_stime" %"PRI_stime"\n"
-                   // ,now - rtds_mc.recv, rtds_mc.info.ofst_old);
-
-
-
-/* periodicity for unchanged tasks 
-            if( rtds_mc.info.peri == 0 )
-            {
-                printk("disabling unchanged..\n");
-                list_for_each_safe( iter, temp, &rtds_mc.unchanged_vcpus )
-                {
-                    struct rt_vcpu* svc = __type_elem(iter);
-                    rt_dump_vcpu(ops, svc);
-
-                    if( svc->cur_budget == 0 || ( !__vcpu_on_q(svc) ) )
-                    {   // taken off runq/replq inside
-                        __deactivate_vcpu(ops, svc);
-                    }
-                }
-            }
-            */
-/* synchronous */
-           // if( rtds_mc.info.sync == 1 )
-           // {
-                /*
-                 * done after all old are disabled
-                 * and all changed are inactive
-                 */
-         /*       if( _old_vcpus_inactive() && _changed_vcpus_inactive() )
-                {
-                    _activate_all_new_vcpus(ops);
-
-                    if( rtds_mc.info.peri == 0 )
-                        _activate_all_unchanged_vcpus(ops);
-
-                    _activate_all_changed_vcpus(ops);
-                    mode_change_over(ops);
-                    count = 0;
-                    printk("sync satisfied, mc finished\n");
-                }
-                else
-                    printk("sync not satisfied\n");
-            }
-           // else
-            {
-                _activate_all_new_vcpus(ops);
-
-                if( rtds_mc.info.peri == 0 )
-                    _activate_all_unchanged_vcpus(ops);
-
-            
-                if( _old_vcpus_inactive() && _changed_vcpus_released())
-                { 
-                    mode_change_over(ops);
-                    count = 0;
-                    printk("async mc finished...\n");
-                }
-            }*/
-            mode_change_over(ops);
-        }
-/* mode change over */
-
-
         snext = __runq_pick(ops, cpumask_of(cpu));
         if ( snext == NULL )
         {
@@ -1721,11 +1630,12 @@ rt_dom_cntl(
     struct vcpu *v;
     unsigned long flags;
     int rc = 0;
-    struct list_head *iter;
+    //struct list_head *iter;
     xen_domctl_schedparam_t local_params;
     mode_change_info_t* mc;
     uint32_t index = 0;
     uint32_t len;
+    int cpu = 3;
 
     switch ( op->cmd )
     {
@@ -1763,28 +1673,34 @@ rt_dom_cntl(
 
     case XEN_DOMCTL_SCHEDOP_putMC:
         printk("rtds mode change info:\n");
-        spin_lock_irqsave(&prv->lock, flags);
         mc = &(op->u.mode_change.info);
         len = mc->nr_vcpus;
+        rtds_mc.info = *mc;
+        rtds_mc.recv = NOW();
         printk("total %d vcpus\n", len);
+
+        
         for ( index = 0; index < len; index++ )
         {
             if ( copy_from_guest_offset(&local_params, op->u.mode_change.params, index,1) )
             {
+                printk("copy failed\n");
                 rc = -EFAULT;
-                goto out;
+                break;
             }
 
             if( local_params.vcpuid >= d->max_vcpus ||
                     d->vcpu[local_params.vcpuid] == NULL ) 
             {
+                printk("invalid vcpuid\n");
                 rc = -EINVAL;
-                spin_unlock_irqrestore(&prv->lock, flags);
                 break;
             }
             svc = rt_vcpu(d->vcpu[local_params.vcpuid]);
 
             svc->mc_param = local_params;
+
+            spin_lock_irqsave(&prv->lock, flags); 
             svc->active = 1;
             svc->mode = 0;
 
@@ -1804,7 +1720,7 @@ rt_dom_cntl(
                     
                     //svc->period = svc->new_param.period;
                     //svc->budget = svc->new_param.budget;
-                    printk(" -p%d -b%d\n",svc->mc_param.rtds.period,svc->mc_param.rtds.budget);
+//                    printk(" -p%d -b%d\n",svc->mc_param.rtds.period,svc->mc_param.rtds.budget);
 
                     list_add_tail(&svc->type_elem, &rtds_mc.new_vcpus);
                     break;
@@ -1812,7 +1728,7 @@ rt_dom_cntl(
                     svc->type = CHANGED;
 
                     printk("vcpu%d is changed", svc->vcpu->vcpu_id);
-                    printk(" -p%d -b%d\n",svc->mc_param.rtds.period,svc->mc_param.rtds.budget);
+//                    printk(" -p%d -b%d\n",svc->mc_param.rtds.period,svc->mc_param.rtds.budget);
 
                     list_add_tail(&svc->type_elem, &rtds_mc.changed_vcpus);
                     break;
@@ -1823,59 +1739,75 @@ rt_dom_cntl(
                     break;
             }
 
+            //disable old
             if ( svc->type != NEW )
             {
                 printk("action_runnig_old: %d ", svc->mc_param.action_running_old);
+                printk("vcpu%d is running\n", curr_on_cpu(cpu)->vcpu_id);
+                if ( curr_on_cpu(cpu) == svc->vcpu &&
+                     svc->mc_param.action_running_old == MC_ABORT )
+                {
+                    svc->cur_budget = 0; // kill budget
+                    svc->active = 0;
+                    printk("aborting vcpu%d\n", svc->vcpu->vcpu_id);
+                }
+
                 printk("action_not_runnig_old: %d\n", svc->mc_param.action_not_running_old);
                 if ( svc->mc_param.action_not_running_old == MC_USE_GUARD )
-                printk("old guards:\n");
-                switch ( svc->mc_param.guard_old_type )
                 {
-                    case MC_TIME_FROM_MCR:
-                        printk("time guard\n");
-                        break;
-                    case MC_TIMER_FROM_LAST_RELEASE:
-                        printk("timer guard\n");
-                        break;
-                    case MC_BUDGET:
-                        printk("budget comp\n");
-                        break;
-                    case MC_PERIOD:
-                        printk("period comp\n");
-                        break;
-                    case MC_BACKLOG:
-                        printk("backlog comp\n");
-                        break;
+                    printk("old guards:\n");
+                    switch ( svc->mc_param.guard_old_type )
+                    {
+                        case MC_TIME_FROM_MCR:
+//                        printk("time guard\n");
+                        //arm timer
+                            break;
+                        case MC_TIMER_FROM_LAST_RELEASE:
+//                        printk("timer guard\n");
+                        //arm timer
+                            break;
+                        case MC_BUDGET:
+//                        printk("budget comp\n");
+                        //test budget
+                            break;
+                        case MC_PERIOD:
+//                        printk("period comp\n");
+                            break;
+                        case MC_BACKLOG:
+//                        printk("backlog comp\n");
+                        //test backlog if not, set hook at the bottom of rt_schedule
+                            break;
+                    }
                 }
             }
-
+            //release new
             if ( svc->type != OLD )
             {
-                printk("new guards:\n");
+//                printk("new guards:\n");
                 switch ( svc->mc_param.guard_new_type )
                 {
                     case MC_TIME_FROM_MCR:
-                        printk("time guard\n");
+//                       printk("time guard\n");
                         break;
                     case MC_TIMER_FROM_LAST_RELEASE:
-                        printk("timer guard\n");
+//                        printk("timer guard\n");
                         break;
                     case MC_BUDGET:
-                        printk("budget comp\n");
+//                        printk("budget comp\n");
                         break;
                     case MC_PERIOD:
-                        printk("period comp\n");
+//                        printk("period comp\n");
                         break;
                     case MC_BACKLOG:
-                        printk("backlog comp\n");
+//                        printk("backlog comp\n");
                         break;
                 }
             }
+            spin_unlock_irqrestore(&prv->lock, flags);
             printk("---------\n");
         }
 
-        rtds_mc.info = *mc;
-
+/*
         printk("old vcpu info:\n");
         list_for_each( iter, &rtds_mc.old_vcpus )
         {
@@ -1905,14 +1837,12 @@ rt_dom_cntl(
         }
 
         printk("\n");
-
+*/
         //rtds_mc.in_trans = 1;
-        rtds_mc.recv = NOW();
-        printk("MC rev: %"PRI_stime"\n", rtds_mc.recv);
+//        printk("MC rev: %"PRI_stime"\n", rtds_mc.recv);
         mode_change_over(ops);
-    out:
-        spin_unlock_irqrestore(&prv->lock, flags);
-    // invoke scheduler now 
+        
+        printk("mc took %"PRI_stime"\n", NOW() - rtds_mc.recv);
         cpu_raise_softirq(current->processor, SCHEDULE_SOFTIRQ);
         break;
     }
