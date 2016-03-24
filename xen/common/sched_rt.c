@@ -1636,6 +1636,7 @@ rt_dom_cntl(
     uint32_t index = 0;
     uint32_t len;
     int cpu = 3;
+    struct vcpu* scur;
 
     switch ( op->cmd )
     {
@@ -1742,9 +1743,10 @@ rt_dom_cntl(
             //disable old
             if ( svc->type != NEW )
             {
+                scur = curr_on_cpu(cpu);
                 printk("action_runnig_old: %d ", svc->mc_param.action_running_old);
-                printk("vcpu%d is running\n", curr_on_cpu(cpu)->vcpu_id);
-                if ( curr_on_cpu(cpu) == svc->vcpu &&
+                printk("vcpu%d is running\n", scur->vcpu_id);
+                if ( scur == svc->vcpu &&
                      svc->mc_param.action_running_old == MC_ABORT )
                 {
                     svc->cur_budget = 0; // kill budget
@@ -1790,6 +1792,7 @@ rt_dom_cntl(
                 {
                     case MC_TIME_FROM_MCR:
 //                       printk("time guard\n");
+                        set_timer(svc->mc_ng_timer, svc->mc_param.guard_new.t_from_MCR + rtds_mc.recv);
                         break;
                     case MC_TIMER_FROM_LAST_RELEASE:
 //                        printk("timer guard\n");
@@ -1974,6 +1977,7 @@ static void mc_ng_timer_handler(void *data){
 
     spin_lock_irq(&prv->lock);
 
+    svc->active = 1;
     if ( now >= svc->cur_deadline )
         rt_update_deadline(now, svc);
 
