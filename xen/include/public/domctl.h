@@ -358,7 +358,7 @@ typedef struct xen_domctl_sched_guard {
 #define MC_SMALLER_THAN 2
 #define MC_EQUAL_TO 3
     struct {
-        int64_t budget_thr;
+        int16_t budget_thr;
         int16_t comp;
     } b_comp;
 
@@ -384,10 +384,10 @@ typedef struct xen_domctl_schedparam_vcpu {
     xen_domctl_sched_rtds_t rtds;
     uint16_t vcpuid;
     uint16_t type;
-    #define OLD 0
-    #define NEW 1
-    #define CHANGED 2
-    #define UNCHANGED 3
+    #define OLD 1
+    #define NEW 2
+    #define CHANGED 3
+    #define UNCHANGED 4
 
 #define MC_ABORT 1
 #define MC_CONTINUE 2
@@ -398,11 +398,11 @@ typedef struct xen_domctl_schedparam_vcpu {
     uint16_t action_not_running_old;
     /* 2 is continue, 1 is use guard */
 
-#define MC_TIME_FROM_MCR 0
-#define MC_TIMER_FROM_LAST_RELEASE 1
-#define MC_BUDGET 2
-#define MC_PERIOD 3
-#define MC_BACKLOG 4
+#define MC_TIME_FROM_MCR 1
+#define MC_TIMER_FROM_LAST_RELEASE 2
+#define MC_BUDGET 3
+#define MC_PERIOD 4
+#define MC_BACKLOG 5
     /*
      * 0: time from MCR
      * 1: timer triggered from MCR to change/disable/release

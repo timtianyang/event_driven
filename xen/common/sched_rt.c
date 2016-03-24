@@ -164,9 +164,9 @@ static unsigned int nr_rt_ops;
 
 static void repl_timer_handler(void *data);
 
-static void mc_release_timer_handler(void *data);
+static void mc_ng_timer_handler(void *data);
 
-static void mc_abort_timer_handler(void *data);
+static void mc_og_timer_handler(void *data);
 
 /*
  * Systme-wide private data, include global RunQueue/DepletedQ
@@ -217,8 +217,8 @@ struct rt_vcpu {
     struct list_head type_elem; /* on the type list */
     struct list_head guard_elem; /* on a list of guards */
 
-    struct timer *mc_abort_timer; /* timer to handle action */ 
-    struct timer *mc_release_timer; /* timer to handle action */
+    struct timer *mc_og_timer; /* timer to handle action */ 
+    struct timer *mc_ng_timer; /* timer to handle action */
 
     xen_domctl_schedparam_t mc_param; /* MC paramters */
 };
@@ -1066,14 +1066,14 @@ rt_alloc_vdata(const struct scheduler *ops, struct vcpu *vc, void *dd)
         svc->active = 1;
         svc->crit = 0;
         svc->ops = ops;
-        svc->mc_release_timer = xzalloc(struct timer);
-        svc->mc_abort_timer = xzalloc(struct timer);
+        svc->mc_ng_timer = xzalloc(struct timer);
+        svc->mc_og_timer = xzalloc(struct timer);
 
-        if ( (svc->mc_abort_timer == NULL) )
+        if ( (svc->mc_og_timer == NULL) )
             return NULL;
 
-        init_timer(svc->mc_release_timer, mc_release_timer_handler, (void *)svc, cpu);
-        init_timer(svc->mc_abort_timer, mc_abort_timer_handler, (void *)svc, cpu);
+        init_timer(svc->mc_ng_timer, mc_ng_timer_handler, (void *)svc, cpu);
+        init_timer(svc->mc_og_timer, mc_og_timer_handler, (void *)svc, cpu);
     }
 
     SCHED_STAT_CRANK(vcpu_alloc);
@@ -1086,10 +1086,10 @@ rt_free_vdata(const struct scheduler *ops, void *priv)
 {
     struct rt_vcpu *svc = priv;
 
-    kill_timer(svc->mc_release_timer);
-    xfree(svc->mc_release_timer);
-    kill_timer(svc->mc_abort_timer);
-    xfree(svc->mc_abort_timer);
+    kill_timer(svc->mc_ng_timer);
+    xfree(svc->mc_ng_timer);
+    kill_timer(svc->mc_og_timer);
+    xfree(svc->mc_og_timer);
 
     xfree(svc);
 }
@@ -1749,8 +1749,10 @@ rt_dom_cntl(
                 {
                     svc->cur_budget = 0; // kill budget
                     svc->active = 0;
-                    printk("aborting vcpu%d\n", svc->vcpu->vcpu_id);
+                    printk("***aborting vcpu%d***\n", svc->vcpu->vcpu_id);
                 }
+                else
+                    printk("not aborting immediately\n");
 
                 printk("action_not_runnig_old: %d\n", svc->mc_param.action_not_running_old);
                 if ( svc->mc_param.action_not_running_old == MC_USE_GUARD )
@@ -1760,7 +1762,7 @@ rt_dom_cntl(
                     {
                         case MC_TIME_FROM_MCR:
 //                        printk("time guard\n");
-                        //arm timer
+                            set_timer(svc->mc_og_timer, svc->mc_param.guard_old.t_from_MCR + rtds_mc.recv);
                             break;
                         case MC_TIMER_FROM_LAST_RELEASE:
 //                        printk("timer guard\n");
@@ -1842,7 +1844,7 @@ rt_dom_cntl(
 //        printk("MC rev: %"PRI_stime"\n", rtds_mc.recv);
         mode_change_over(ops);
         
-        printk("mc took %"PRI_stime"\n", NOW() - rtds_mc.recv);
+        printk("mc recv %"PRI_stime"\n", rtds_mc.recv);
         cpu_raise_softirq(current->processor, SCHEDULE_SOFTIRQ);
         break;
     }
@@ -1934,27 +1936,53 @@ static void repl_timer_handler(void *data){
 }
 
 /*
- * mc_timer disable vcpus
+ * mc_timer for old guard
  */
-static void mc_abort_timer_handler(void *data){
+static void mc_og_timer_handler(void *data){
     struct rt_vcpu *svc = (struct rt_vcpu*)data;
     const struct scheduler *ops = svc->ops;
+    struct rt_private *prv = rt_priv(ops);
 
-    __q_remove(ops, svc);
+    spin_lock_irq(&prv->lock);
+
+    svc->active = 0;
+    svc->mode = 1;
+
+    if ( current == svc->vcpu )
+    {
+        printk("timer: vcpu%d running\n", svc->vcpu->vcpu_id);
+        svc->cur_budget = 0; // kill budget 
+    }
+    else if ( __vcpu_on_q(svc) ) 
+        __q_remove(ops, svc);
+   
+    printk("timer: aborting vcpu%d at %"PRI_stime"\n", svc->vcpu->vcpu_id, NOW());
+    spin_unlock_irq(&prv->lock);
+    if ( svc->mc_param.guard_new_type == MC_TIME_FROM_MCR )
+        set_timer(svc->mc_ng_timer, rtds_mc.recv + svc->mc_param.guard_new.t_from_MCR);
 }
 
 /*
- * mc_timer enable vcpus
+ * mc_timer for new guard vcpus
  */
-static void mc_release_timer_handler(void *data){
+static void mc_ng_timer_handler(void *data){
     s_time_t now = NOW();
     struct rt_vcpu *svc = (struct rt_vcpu*)data;
     const struct scheduler *ops = svc->ops;
+    struct list_head *replq = rt_replq(ops);
+    struct rt_private *prv = rt_priv(ops);
+
+    spin_lock_irq(&prv->lock);
 
     if ( now >= svc->cur_deadline )
         rt_update_deadline(now, svc);
 
+    if ( !vcpu_on_replq(svc) )
+        deadline_replq_insert(svc, &svc->replq_elem, replq);
     __runq_insert(ops, svc);
+    spin_unlock_irq(&prv->lock);
+
+    printk("timer: enabling vcpu%d at %"PRI_stime"\n", svc->vcpu->vcpu_id, now);
 }
 
 static const struct scheduler sched_rtds_def = {
