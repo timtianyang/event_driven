@@ -1711,7 +1711,7 @@ rt_dom_cntl(
                 case OLD:
                     svc->type = OLD;
                     printk("vcpu%d is old\n", svc->vcpu->vcpu_id);
-                    list_add_tail(&svc->type_elem, &rtds_mc.old_vcpus);
+//                    list_add_tail(&svc->type_elem, &rtds_mc.old_vcpus);
                     break;
                 case NEW:
                     svc->type = NEW;
@@ -1719,11 +1719,11 @@ rt_dom_cntl(
 
                     printk("vcpu%d is new ", svc->vcpu->vcpu_id);
                     
-                    //svc->period = svc->new_param.period;
-                    //svc->budget = svc->new_param.budget;
+                    svc->period = svc->mc_param.rtds.period;
+                    svc->budget = svc->mc_param.rtds.budget;
 //                    printk(" -p%d -b%d\n",svc->mc_param.rtds.period,svc->mc_param.rtds.budget);
 
-                    list_add_tail(&svc->type_elem, &rtds_mc.new_vcpus);
+//                    list_add_tail(&svc->type_elem, &rtds_mc.new_vcpus);
                     break;
                 case CHANGED:
                     svc->type = CHANGED;
@@ -1731,12 +1731,12 @@ rt_dom_cntl(
                     printk("vcpu%d is changed", svc->vcpu->vcpu_id);
 //                    printk(" -p%d -b%d\n",svc->mc_param.rtds.period,svc->mc_param.rtds.budget);
 
-                    list_add_tail(&svc->type_elem, &rtds_mc.changed_vcpus);
+//                    list_add_tail(&svc->type_elem, &rtds_mc.changed_vcpus);
                     break;
                 case UNCHANGED:
                     svc->type = UNCHANGED;
                     printk("vcpu%d is unchanged\n", svc->vcpu->vcpu_id);
-                    list_add_tail(&svc->type_elem, &rtds_mc.unchanged_vcpus);
+//                    list_add_tail(&svc->type_elem, &rtds_mc.unchanged_vcpus);
                     break;
             }
 
@@ -1961,6 +1961,7 @@ static void mc_og_timer_handler(void *data){
    
     printk("timer: aborting vcpu%d at %"PRI_stime"\n", svc->vcpu->vcpu_id, NOW());
     spin_unlock_irq(&prv->lock);
+    cpu_raise_softirq(svc->vcpu->processor, SCHEDULE_SOFTIRQ);
     if ( svc->mc_param.guard_new_type == MC_TIME_FROM_MCR )
         set_timer(svc->mc_ng_timer, rtds_mc.recv + svc->mc_param.guard_new.t_from_MCR);
 }
@@ -1985,7 +1986,7 @@ static void mc_ng_timer_handler(void *data){
         deadline_replq_insert(svc, &svc->replq_elem, replq);
     __runq_insert(ops, svc);
     spin_unlock_irq(&prv->lock);
-
+    cpu_raise_softirq(svc->vcpu->processor, SCHEDULE_SOFTIRQ);
     printk("timer: enabling vcpu%d at %"PRI_stime"\n", svc->vcpu->vcpu_id, now);
 }
 
