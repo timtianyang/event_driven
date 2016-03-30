@@ -128,6 +128,9 @@
 #define __RTDS_depleted     3
 #define RTDS_depleted (1<<__RTDS_depleted)
 
+#define __RTDS_wakeup_on_q     3
+#define RTDS_wakeup_on_q (1<<__RTDS_wakeup_on_q)
+
 /*
  * rt tracing events ("only" 512 available!). Check
  * include/public/trace.h for more details.
@@ -186,6 +189,7 @@ struct rt_job {
     s_time_t cur_deadline;      /* current deadline for EDF */
     /* job deadline might be different than task's */
 
+    int on_runq;
     /* up-pointers */
     struct rt_vcpu *svc;
 };
@@ -290,7 +294,7 @@ __vcpu_on_q(const struct rt_vcpu *svc)
     list_for_each( iter_job, &svc->jobq )
     {
         struct rt_job* job = __q_elem(iter_job);
-        if ( !list_empty(&job->q_elem) )
+        if ( job->on_runq )
             return 1;
     }
     return 0;
@@ -580,6 +584,7 @@ __q_remove(const struct scheduler* ops, struct rt_vcpu *svc)
 //        printk("r3\n");
         list_add_tail(&job->q_elem, depletedq);
         svc->num_jobs--;
+        job->on_runq = 0;
     }
 }
 
@@ -622,6 +627,7 @@ runq_remove(struct rt_job *job)
     ASSERT( !list_empty(&job->q_elem) );
     //printk("rm a job from runq\n");
     list_del_init(&job->q_elem);
+    job->on_runq = 0;
 }
 /*
  * Get a job before release. Re-use those one the
@@ -641,7 +647,7 @@ get_job(const struct scheduler* ops)
     }
     else
     {
-        printk("not_enough_jobs!!\n");
+//        printk("not_enough_jobs!!\n");
         job = NULL;
     }
     return job;
@@ -662,7 +668,7 @@ release_job(const struct scheduler* ops, s_time_t now, struct rt_vcpu* svc)
     {
         job->cur_budget = svc->budget;
         job->cur_deadline = now + svc->period;
-
+        job->on_runq = 0;
         job_vcpu_insert(svc, job);
     }
 //    printk("release job\n");
@@ -708,6 +714,7 @@ runq_insert(const struct scheduler *ops, struct rt_job *job)
             break;
     }
     list_add_tail(&job->q_elem, iter);
+    job->on_runq = 1;
 //    printk("insert vcpu%d's job to runq\n",job->svc->vcpu->vcpu_id);
 }
 
@@ -1483,6 +1490,7 @@ rt_vcpu_wake(const struct scheduler *ops, struct vcpu *vc)
     if ( unlikely(__vcpu_on_q(svc)) )
     {
         printk("vcpu%d wakeup on queue\n",vc->vcpu_id);
+        __set_bit(__RTDS_wakeup_on_q, &svc->flags);
 /*        if ( !vcpu_on_replq(svc) )
         {
             replq_insert(ops, svc);
@@ -1557,20 +1565,24 @@ rt_context_saved(const struct scheduler *ops, struct vcpu *vc)
     if ( is_idle_vcpu(vc) )
         goto out;
 
-    if ( __test_and_clear_bit(__RTDS_delayed_runq_add, &svc->flags) &&
-         likely(vcpu_runnable(vc)) )
+    if ( ( __test_and_clear_bit(__RTDS_delayed_runq_add, &svc->flags) &&
+         likely(vcpu_runnable(vc)) ) )
     {
 //        printk("context, put vcpu%d job to queue with %"PRI_stime"\n",svc->vcpu->vcpu_id, svc->running_job->cur_budget);
         runq_insert(ops, svc->running_job);
         svc->running_job = NULL;
         //runq_tickle(ops, svc);
     }
+/*    else if ( __test_and_clear_bit(__RTDS_wakeup_on_q, &svc->flags) )
+    {
+        replq_remove(ops, svc);
+    }*/
     else
     {
-        printk("context_saved,vcpu%d not runnable\n",svc->vcpu->vcpu_id);
+//        printk("context_saved,vcpu%d not runnable\n",svc->vcpu->vcpu_id);
         replq_remove(ops, svc);
-        printk("removing %d jobs\n",svc->num_jobs);
-        __q_remove(ops, svc);
+//        printk("removing %d jobs\n",svc->num_jobs);
+//        __q_remove(ops, svc);
     }
 out:
     vcpu_schedule_unlock_irq(lock, vc);
