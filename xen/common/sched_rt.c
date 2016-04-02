@@ -291,6 +291,9 @@ __vcpu_on_q(const struct rt_vcpu *svc)
      * this keeps the original idea of a vcpu on run queue 
      * in the old design
      */
+    if ( svc->running_job != NULL )
+        return 0;
+
     list_for_each( iter_job, &svc->jobq )
     {
         struct rt_job* job = __q_elem(iter_job);
@@ -703,6 +706,7 @@ runq_insert(const struct scheduler *ops, struct rt_job *job)
         list_del_init(&job->jobq_elem);
         list_add_tail(&job->q_elem, depletedq);
         job->svc->num_jobs--;
+        job->on_runq = 0;
 //        printk("insert vcpu%d's job to depq\n",job->svc->vcpu->vcpu_id);
         return;
     }
@@ -771,10 +775,7 @@ replq_reinsert(const struct scheduler *ops, struct rt_vcpu *svc)
         rearm = deadline_replq_insert(svc, &svc->replq_elem, replq);
 
     if ( rearm )
-    {
         set_timer(rt_priv(ops)->repl_timer, rearm_svc->cur_deadline);
-//        printk("re-prog timer\n");
-    }
 }
 
 /*
@@ -1490,8 +1491,26 @@ rt_vcpu_wake(const struct scheduler *ops, struct vcpu *vc)
     if ( unlikely(__vcpu_on_q(svc)) )
     {
         printk("vcpu%d wakeup on queue\n",vc->vcpu_id);
+/*        struct list_head* iter_job;
+        struct list_head* runq = rt_runq(ops);
+
+        printk("vcpu%d wakeup on queue\n",vc->vcpu_id);
         __set_bit(__RTDS_wakeup_on_q, &svc->flags);
-/*        if ( !vcpu_on_replq(svc) )
+        printk("Global RunQueue info:\n");
+        list_for_each( iter_job, runq )
+        {
+            struct rt_job* job = __q_elem(iter_job);
+            printk("vcpu%d-b=%"PRI_stime" d=%"PRI_stime" ",job->svc->vcpu->vcpu_id, job->cur_budget, job->cur_deadline);
+        }
+        printk("\n");
+        printk("jobs on this vcpu:\n");
+        list_for_each( iter_job, &svc->jobq )
+        {
+            struct rt_job* job = jobq_elem(iter_job);
+            printk("vcpu%d on runq=%d",job->svc->vcpu->vcpu_id, job->on_runq);
+        }
+        printk("\n"); 
+        if ( !vcpu_on_replq(svc) )
         {
             replq_insert(ops, svc);
             printk("missing from replq\n");
@@ -1570,20 +1589,23 @@ rt_context_saved(const struct scheduler *ops, struct vcpu *vc)
     {
 //        printk("context, put vcpu%d job to queue with %"PRI_stime"\n",svc->vcpu->vcpu_id, svc->running_job->cur_budget);
         runq_insert(ops, svc->running_job);
-        svc->running_job = NULL;
         //runq_tickle(ops, svc);
     }
 /*    else if ( __test_and_clear_bit(__RTDS_wakeup_on_q, &svc->flags) )
     {
+        printk("shit is going on \n");
         replq_remove(ops, svc);
+        __q_remove(ops, svc);
     }*/
     else
     {
 //        printk("context_saved,vcpu%d not runnable\n",svc->vcpu->vcpu_id);
         replq_remove(ops, svc);
 //        printk("removing %d jobs\n",svc->num_jobs);
-//        __q_remove(ops, svc);
+        __q_remove(ops, svc);
     }
+
+    svc->running_job = NULL;
 out:
     vcpu_schedule_unlock_irq(lock, vc);
 }
