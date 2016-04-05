@@ -53,8 +53,8 @@ void set_guard_comp(xen_domctl_sched_guard_t* cur_guard, ezxml_t parent, int typ
                 cur_guard->b_comp.comp = MC_LARGER_THAN;
             else if (strcmp(temp->txt, "<=") == 0)
                 cur_guard->b_comp.comp = MC_SMALLER_THAN;
-            else if (strcmp(temp->txt, "=") == 0)
-                cur_guard->b_comp.comp = MC_EQUAL_TO;
+/*            else if (strcmp(temp->txt, "=") == 0)
+                cur_guard->b_comp.comp = MC_EQUAL_TO;*/
             else
             {
                 printf("unknown comparator %s\n",temp->txt);
