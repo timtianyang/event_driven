@@ -1367,7 +1367,7 @@ burn_budget(const struct scheduler *ops, struct rt_vcpu *svc, s_time_t now)
         __set_bit(__RTDS_depleted, &svc->flags);
     }
 
-    /* TRACE 
+    /* TRACE */ 
     {
         struct {
             unsigned vcpu:16, dom:16;
@@ -1377,13 +1377,13 @@ burn_budget(const struct scheduler *ops, struct rt_vcpu *svc, s_time_t now)
         } d;
         d.dom = svc->vcpu->domain->domain_id;
         d.vcpu = svc->vcpu->vcpu_id;
-        d.cur_budget_lo = (unsigned) svc->cur_budget;
-        d.cur_budget_hi = (unsigned) (svc->cur_budget >> 32);
+        d.cur_budget_lo = (unsigned) svc->budget;
+        d.cur_budget_hi = (unsigned) (svc->budget >> 32);
         d.delta = delta;
         trace_var(TRC_RTDS_BUDGET_BURN, 1,
                   sizeof(d),
                   (unsigned char *) &d);
-    }*/
+    }
 }
 
 /*
@@ -1422,10 +1422,11 @@ __runq_pick(const struct scheduler *ops, const cpumask_t *mask)
     else
         printk("runq_pick = NULL\n");
 */
-    /* TRACE
+    /* TRACE */
     {
-        if( svc != NULL )
+        if( job != NULL )
         {
+            struct rt_vcpu* svc = job->svc;
             struct {
                 unsigned vcpu:16, dom:16;
                 unsigned cur_deadline_lo, cur_deadline_hi;
@@ -1435,13 +1436,13 @@ __runq_pick(const struct scheduler *ops, const cpumask_t *mask)
             d.vcpu = svc->vcpu->vcpu_id;
             d.cur_deadline_lo = (unsigned) svc->cur_deadline;
             d.cur_deadline_hi = (unsigned) (svc->cur_deadline >> 32);
-            d.cur_budget_lo = (unsigned) svc->cur_budget;
-            d.cur_budget_hi = (unsigned) (svc->cur_budget >> 32);
+            d.cur_budget_lo = (unsigned) svc->budget;
+            d.cur_budget_hi = (unsigned) (svc->budget >> 32);
             trace_var(TRC_RTDS_RUNQ_PICK, 1,
                       sizeof(d),
                       (unsigned char *) &d);
         }
-    }*/
+    }
 
     return job;
 }
@@ -2127,14 +2128,15 @@ static void repl_timer_handler(void *data){
     struct scheduler *ops = data;
     struct rt_private *prv = rt_priv(ops);
     struct list_head *replq = rt_replq(ops);
-    struct list_head *runq = rt_runq(ops);
+    //struct list_head *runq = rt_runq(ops);
     struct timer *repl_timer = prv->repl_timer;
     struct list_head *iter, *tmp;
-    const struct rt_vcpu* scurr = rt_vcpu(current);
+    //const struct rt_vcpu* scurr = rt_vcpu(current);
 //    struct list_head *iter_job;
     struct rt_vcpu *svc;
     long flag;
     LIST_HEAD(tmp_replq);
+    int tickle = 0;
 
     spin_lock_irqsave(&prv->lock, flag);
 //    printk("t\n");
@@ -2188,7 +2190,7 @@ static void repl_timer_handler(void *data){
     {
         svc = replq_elem(iter);
 
-        if ( !is_idle_vcpu(scurr->vcpu) )
+        /*if ( !is_idle_vcpu(scurr->vcpu) )
         {
             if ( scurr != svc &&
                 !list_empty(runq) )
@@ -2201,10 +2203,15 @@ static void repl_timer_handler(void *data){
         }
         else
             runq_tickle(ops, svc);
+        */
 
+        tickle = 1;
         list_del(&svc->replq_elem);
         deadline_replq_insert(svc, &svc->replq_elem, replq);
     }
+
+    if ( tickle )
+        runq_tickle(ops, svc);
 
     /*
      * If there are vcpus left in the replenishment event list,
