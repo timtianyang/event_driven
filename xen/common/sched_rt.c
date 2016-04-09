@@ -133,9 +133,9 @@
  * include/public/trace.h for more details.
  */
 #define TRC_RTDS_TICKLE           TRC_SCHED_CLASS_EVT(RTDS, 1)
-#define TRC_RTDS_RUNQ_PICK        TRC_SCHED_CLASS_EVT(RTDS, 2)
+#define TRC_RTDS_SCHEDULE         TRC_SCHED_CLASS_EVT(RTDS, 2)
 #define TRC_RTDS_BUDGET_BURN      TRC_SCHED_CLASS_EVT(RTDS, 3)
-#define TRC_RTDS_BUDGET_REPLENISH TRC_SCHED_CLASS_EVT(RTDS, 4)
+#define TRC_RTDS_JOB_RELEASE      TRC_SCHED_CLASS_EVT(RTDS, 4)
 #define TRC_RTDS_SCHED_TASKLET    TRC_SCHED_CLASS_EVT(RTDS, 5)
 
  /*
@@ -519,25 +519,6 @@ rt_update_deadline(s_time_t now, struct rt_vcpu *svc)
     }
 
    //svc->cur_budget = svc->budget;
-
-    /* TRACE */
-    {
-        struct {
-            unsigned vcpu:16, dom:16;
-            unsigned cur_deadline_lo, cur_deadline_hi;
-            unsigned cur_budget_lo, cur_budget_hi;
-        } d;
-        d.dom = svc->vcpu->domain->domain_id;
-        d.vcpu = svc->vcpu->vcpu_id;
-        d.cur_deadline_lo = (unsigned) svc->cur_deadline;
-        d.cur_deadline_hi = (unsigned) (svc->cur_deadline >> 32);
-        d.cur_budget_lo = (unsigned) svc->cur_deadline;
-        d.cur_budget_hi = (unsigned) (svc->cur_deadline >> 32);
-        trace_var(TRC_RTDS_BUDGET_REPLENISH, 1,
-                  sizeof(d),
-                  (unsigned char *) &d);
-    }
-
     return;
 }
 
@@ -743,6 +724,24 @@ release_job(const struct scheduler* ops, s_time_t now, struct rt_vcpu* svc)
         job->cur_deadline = now + svc->period;
         job->on_runq = 0;
         job_vcpu_insert(svc, job);
+
+            /* TRACE */
+        {
+        struct {
+            unsigned vcpu:16, dom:16;
+            unsigned cur_deadline_lo, cur_deadline_hi;
+            unsigned cur_budget_lo, cur_budget_hi;
+        } d;
+        d.dom = svc->vcpu->domain->domain_id;
+        d.vcpu = svc->vcpu->vcpu_id;
+        d.cur_deadline_lo = (unsigned) job->cur_deadline;
+        d.cur_deadline_hi = (unsigned) (job->cur_deadline >> 32);
+        d.cur_budget_lo = (unsigned) job->cur_budget;
+        d.cur_budget_hi = (unsigned) (job->cur_budget >> 32);
+        trace_var(TRC_RTDS_JOB_RELEASE, 1,
+                  sizeof(d),
+                  (unsigned char *) &d);
+        }
     }
 //    printk("release job\n");
     return job;
@@ -1377,8 +1376,8 @@ burn_budget(const struct scheduler *ops, struct rt_vcpu *svc, s_time_t now)
         } d;
         d.dom = svc->vcpu->domain->domain_id;
         d.vcpu = svc->vcpu->vcpu_id;
-        d.cur_budget_lo = (unsigned) svc->budget;
-        d.cur_budget_hi = (unsigned) (svc->budget >> 32);
+        d.cur_budget_lo = (unsigned) job->cur_budget;
+        d.cur_budget_hi = (unsigned) (job->cur_budget >> 32);
         d.delta = delta;
         trace_var(TRC_RTDS_BUDGET_BURN, 1,
                   sizeof(d),
@@ -1422,28 +1421,6 @@ __runq_pick(const struct scheduler *ops, const cpumask_t *mask)
     else
         printk("runq_pick = NULL\n");
 */
-    /* TRACE */
-    {
-        if( job != NULL )
-        {
-            struct rt_vcpu* svc = job->svc;
-            struct {
-                unsigned vcpu:16, dom:16;
-                unsigned cur_deadline_lo, cur_deadline_hi;
-                unsigned cur_budget_lo, cur_budget_hi;
-            } d;
-            d.dom = svc->vcpu->domain->domain_id;
-            d.vcpu = svc->vcpu->vcpu_id;
-            d.cur_deadline_lo = (unsigned) svc->cur_deadline;
-            d.cur_deadline_hi = (unsigned) (svc->cur_deadline >> 32);
-            d.cur_budget_lo = (unsigned) svc->budget;
-            d.cur_budget_hi = (unsigned) (svc->budget >> 32);
-            trace_var(TRC_RTDS_RUNQ_PICK, 1,
-                      sizeof(d),
-                      (unsigned char *) &d);
-        }
-    }
-
     return job;
 }
 
@@ -1586,6 +1563,42 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
 //    else
 //        printk("snext idle\n");
     ret.task = snext->vcpu;
+
+        /* TRACE */
+    {
+        
+            struct {
+                unsigned vcpu:16, dom:16;
+                unsigned cur_deadline_lo, cur_deadline_hi;
+                unsigned cur_budget_lo, cur_budget_hi;
+            } d;
+            
+        if( !is_idle_vcpu(snext->vcpu) )
+        {
+            struct rt_vcpu* svc = picked_job->svc;
+            d.vcpu = svc->vcpu->vcpu_id;
+            d.dom = svc->vcpu->domain->domain_id;
+            d.cur_deadline_lo = (unsigned) picked_job->cur_deadline;
+            d.cur_deadline_hi = (unsigned) (picked_job->cur_deadline >> 32);
+            d.cur_budget_lo = (unsigned) picked_job->cur_budget;
+            d.cur_budget_hi = (unsigned) (picked_job->cur_budget >> 32);
+            trace_var(TRC_RTDS_SCHEDULE, 1,
+                      sizeof(d),
+                      (unsigned char *) &d);
+        }
+        else
+        {
+            d.vcpu = snext->vcpu->domain->max_vcpus;
+            d.dom = snext->vcpu->domain->domain_id;
+            d.cur_deadline_lo = 0;
+            d.cur_deadline_hi = 0;
+            d.cur_budget_lo = 0;
+            d.cur_budget_hi = 0;
+            trace_var(TRC_RTDS_SCHEDULE, 1,
+                      sizeof(d),
+                      (unsigned char *) &d);
+        }
+    }
 
     return ret;
 }

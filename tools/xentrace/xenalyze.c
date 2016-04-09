@@ -7574,7 +7574,7 @@ void sched_process(struct pcpu_info *p)
                        ri->dump_header, r->cpu);
             }
             break;
-        case TRC_SCHED_CLASS_EVT(RTDS, 2): /* RUNQ_PICK        */
+        case TRC_SCHED_CLASS_EVT(RTDS, 2): /* SCHEDULE        */
             if(opt.dump_all) {
                 struct {
                     unsigned int vcpuid:16, domid:16;
@@ -7584,7 +7584,7 @@ void sched_process(struct pcpu_info *p)
                 uint64_t dl = (((uint64_t)r->cur_dl_hi) << 32) + r->cur_dl_lo;
                 uint64_t bg = (((uint64_t)r->cur_bg_hi) << 32) + r->cur_bg_lo;
 
-                printf(" %s rtds:runq_pick d%uv%u, deadline = %"PRIu64", "
+                printf(" %s rtds:schedule d%uv%u, deadline = %"PRIu64", "
                        "budget = %"PRIu64"\n", ri->dump_header,
                        r->domid, r->vcpuid, dl, bg);
             }
@@ -7603,7 +7603,7 @@ void sched_process(struct pcpu_info *p)
                        r->vcpuid, bg, r->delta);
             }
             break;
-        case TRC_SCHED_CLASS_EVT(RTDS, 4): /* BUDGET_REPLENISH */
+        case TRC_SCHED_CLASS_EVT(RTDS, 4): /* JOB_RELEASE */
             if(opt.dump_all) {
                 struct {
                     unsigned int vcpuid:16, domid:16;
@@ -7613,7 +7613,7 @@ void sched_process(struct pcpu_info *p)
                 uint64_t dl = (((uint64_t)r->cur_dl_hi) << 32) + r->cur_dl_lo;
                 uint64_t bg = (((uint64_t)r->cur_bg_hi) << 32) + r->cur_bg_lo;
 
-                printf(" %s rtds:repl_budget d%uv%u, deadline = %"PRIu64", "
+                printf(" %s rtds:job_release d%uv%u, deadline = %"PRIu64", "
                        "budget = %"PRIu64"\n", ri->dump_header,
                        r->domid, r->vcpuid, dl, bg);
             }

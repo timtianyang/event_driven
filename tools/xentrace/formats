@@ -37,9 +37,9 @@
 0x0002800f  CPU%(cpu)d  %(tsc)d (+%(reltsc)8d)  switch_infnext    [ new_domid = 0x%(1)08x, time = %(2)d, r_time = %(3)d ]
 
 0x00022801  CPU%(cpu)d  %(tsc)d (+%(reltsc)8d)  rtds:tickle        [ cpu = %(1)d ]
-0x00022802  CPU%(cpu)d  %(tsc)d (+%(reltsc)8d)  rtds:runq_pick     [ dom:vcpu = 0x%(1)08x, cur_deadline = 0x%(3)08x%(2)08x, cur_budget = 0x%(5)08x%(4)08x ]
+0x00022802  CPU%(cpu)d  %(tsc)d (+%(reltsc)8d)  rtds:schedule     [ dom:vcpu = 0x%(1)08x, cur_deadline = 0x%(3)08x%(2)08x, cur_budget = 0x%(5)08x%(4)08x ]
 0x00022803  CPU%(cpu)d  %(tsc)d (+%(reltsc)8d)  rtds:burn_budget   [ dom:vcpu = 0x%(1)08x, cur_budget = 0x%(3)08x%(2)08x, delta = %(4)d ]
-0x00022804  CPU%(cpu)d  %(tsc)d (+%(reltsc)8d)  rtds:repl_budget   [ dom:vcpu = 0x%(1)08x, cur_deadline = 0x%(3)08x%(2)08x, cur_budget = 0x%(5)08x%(4)08x ]
+0x00022804  CPU%(cpu)d  %(tsc)d (+%(reltsc)8d)  rtds:job_release   [ dom:vcpu = 0x%(1)08x, cur_deadline = 0x%(3)08x%(2)08x, cur_budget = 0x%(5)08x%(4)08x ]
 0x00022805  CPU%(cpu)d  %(tsc)d (+%(reltsc)8d)  rtds:sched_tasklet
 
 0x00081001  CPU%(cpu)d  %(tsc)d (+%(reltsc)8d)  VMENTRY
