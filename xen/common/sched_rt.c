@@ -137,6 +137,9 @@
 #define TRC_RTDS_BUDGET_BURN      TRC_SCHED_CLASS_EVT(RTDS, 3)
 #define TRC_RTDS_JOB_RELEASE      TRC_SCHED_CLASS_EVT(RTDS, 4)
 #define TRC_RTDS_SCHED_TASKLET    TRC_SCHED_CLASS_EVT(RTDS, 5)
+#define TRC_RTDS_DIS_RUNNING      TRC_SCHED_CLASS_EVT(RTDS, 6)
+#define TRC_RTDS_DIS_NOT_RUNNING  TRC_SCHED_CLASS_EVT(RTDS, 7)
+#define TRC_RTDS_VCPU_ENABLE      TRC_SCHED_CLASS_EVT(RTDS, 8)
 
  /*
   * Useful to avoid too many cpumask_var_t on the stack.
@@ -349,7 +352,7 @@ vcpu_has_job_onq(const struct rt_vcpu *svc)
         struct rt_job* job = jobq_elem(iter_job);
         //if ( svc->running_job != NULL )
         //    printk("vcpu%d has running job, its onq= %d", svc->vcpu->vcpu_id, svc->running_job->on_runq);
-        if ( job->on_runq && job )
+        if ( job->on_runq )
             return 1;
     }
     return 0;
@@ -721,7 +724,7 @@ release_job(const struct scheduler* ops, s_time_t now, struct rt_vcpu* svc)
     if ( job != NULL )
     {
         job->cur_budget = svc->budget;
-        job->cur_deadline = now + svc->period;
+        job->cur_deadline = svc->cur_deadline;
         job->on_runq = 0;
         job_vcpu_insert(svc, job);
 
@@ -848,6 +851,65 @@ replq_reinsert(const struct scheduler *ops, struct rt_vcpu *svc)
         set_timer(rt_priv(ops)->repl_timer, rearm_svc->cur_deadline);
 }
 
+static inline void trace_disable_running(struct rt_vcpu* svc)
+{
+    struct {
+        unsigned vcpu:16, dom:16;
+        unsigned cur_deadline_lo, cur_deadline_hi;
+        unsigned cur_budget_lo, cur_budget_hi;
+    } d;
+
+    d.dom = svc->vcpu->domain->domain_id;
+    d.vcpu = svc->vcpu->vcpu_id;
+    d.cur_deadline_lo = (unsigned) svc->running_job->cur_deadline;
+    d.cur_deadline_hi = (unsigned) (svc->running_job->cur_deadline >> 32);
+    d.cur_budget_lo = (unsigned) svc->running_job->cur_budget;
+    d.cur_budget_hi = (unsigned) (svc->running_job->cur_budget >> 32);
+    trace_var(TRC_RTDS_DIS_RUNNING, 1,
+        sizeof(d),
+        (unsigned char *) &d);
+}
+
+static inline void trace_disable_not_running(struct rt_vcpu* svc)
+{
+    struct {
+        unsigned vcpu:16, dom:16;
+//        unsigned cur_deadline_lo, cur_deadline_hi;
+//        unsigned cur_budget_lo, cur_budget_hi;
+    } d;
+
+    d.dom = svc->vcpu->domain->domain_id;
+    d.vcpu = svc->vcpu->vcpu_id;
+/*    d.cur_deadline_lo = (unsigned) svc->running_job->cur_deadline;
+    d.cur_deadline_hi = (unsigned) (svc->running_job->cur_deadline >> 32);
+    d.cur_budget_lo = (unsigned) svc->running_job->cur_budget;
+    d.cur_budget_hi = (unsigned) (svc->running_job->cur_budget >> 32);
+*/
+    trace_var(TRC_RTDS_DIS_NOT_RUNNING, 1,
+        sizeof(d),
+        (unsigned char *) &d);
+}
+
+static inline void trace_enable_vcpu(struct rt_vcpu* svc)
+{
+    struct {
+        unsigned vcpu:16, dom:16;
+//        unsigned cur_deadline_lo, cur_deadline_hi;
+//        unsigned cur_budget_lo, cur_budget_hi;
+    } d;
+
+    d.dom = svc->vcpu->domain->domain_id;
+    d.vcpu = svc->vcpu->vcpu_id;
+/*    d.cur_deadline_lo = (unsigned) svc->running_job->cur_deadline;
+    d.cur_deadline_hi = (unsigned) (svc->running_job->cur_deadline >> 32);
+    d.cur_budget_lo = (unsigned) svc->running_job->cur_budget;
+    d.cur_budget_hi = (unsigned) (svc->running_job->cur_budget >> 32);
+*/
+    trace_var(TRC_RTDS_VCPU_ENABLE, 1,
+        sizeof(d),
+        (unsigned char *) &d);
+}
+
 /*
  * for a vcpu that uses backlog as guards
  * disables queued vcpus and/or running vcpus
@@ -898,16 +960,23 @@ check_backlog_guard(const struct scheduler* ops, struct rt_vcpu *svc, int old_ne
             svc->active = 0;
             if ( svc->running_job != NULL && disable_running )
             {
+                trace_disable_running(svc);
                 printk("bkg: vcpu%d running\n", svc->vcpu->vcpu_id);
                 svc->running_job->cur_budget = 0; // kill budget 
             }
-            __q_remove(ops, svc);
+
+            if ( vcpu_has_job_onq(svc) )
+            {
+                trace_disable_not_running(svc);
+                __q_remove(ops, svc);
+            }
         }
         else
         {
             struct rt_job* job;
             s_time_t now = NOW();
             printk("new backlog guard enabling..\n");
+            trace_enable_vcpu(svc);
             svc->active = 1;
             if ( now >= svc->cur_deadline )
                 rt_update_deadline(now, svc);
@@ -946,6 +1015,10 @@ scan_backlog_new_list(const struct scheduler* ops)
     return tickle;
 }
 
+/*
+ * Scans all queued jobs of a vcpu and disable them if budget
+ * satisfies the guard.
+ */
 static inline void
 check_budget_guard(const struct scheduler *ops, struct rt_vcpu *svc)
 {
@@ -1454,6 +1527,7 @@ mode_change_over(const struct scheduler *ops)
     rtds_mc.in_trans = 0; 
 }
 */
+
 /*
  * schedule function for rt scheduler.
  * The lock is already grabbed in schedule.c, no need to lock here
@@ -1812,8 +1886,6 @@ rt_vcpu_wake(const struct scheduler *ops, struct vcpu *vc)
     missed = ( now >= svc->cur_deadline );
     if ( missed )
         rt_update_deadline(now, svc);
-
-    job = release_job(ops, now, svc);
     /*
      * If context hasn't been saved for this vcpu yet, we can't put it on
      * the run-queue/depleted-queue. Instead, we set the appropriate flag,
@@ -1838,6 +1910,8 @@ rt_vcpu_wake(const struct scheduler *ops, struct vcpu *vc)
     /* Replenishment event got cancelled when we blocked. Add it back. */
     replq_insert(ops, svc);
     /* insert svc to runq/depletedq because svc is not in queue now */
+    job = release_job(ops, now, svc);
+
     if ( job != NULL )
         runq_insert(ops, job);
 
@@ -1986,39 +2060,32 @@ rt_dom_cntl(
             svc->mode = 0;
 
             printk("---------\n");
+
+            if ( vcpu_on_replq(svc) )
+                replq_remove(ops,svc);
+
+            svc->active = 0;
+
             switch (svc->mc_param.type)
             {
                 case OLD:
                     svc->type = OLD;
                     printk("vcpu%d is old\n", svc->vcpu->vcpu_id);
-//                    list_add_tail(&svc->type_elem, &rtds_mc.old_vcpus);
-                    replq_remove(ops,svc);
                     break;
                 case NEW:
                     svc->type = NEW;
-
                     printk("vcpu%d is new ", svc->vcpu->vcpu_id);
                     
                     svc->period = svc->mc_param.rtds.period;
                     svc->budget = svc->mc_param.rtds.budget;
-//                    printk(" -p%d -b%d\n",svc->mc_param.rtds.period,svc->mc_param.rtds.budget);
-
-//                    list_add_tail(&svc->type_elem, &rtds_mc.new_vcpus);
                     break;
                 case CHANGED:
                     svc->type = CHANGED;
-                    replq_remove(ops,svc);
                     printk("vcpu%d is changed", svc->vcpu->vcpu_id);
-//                    printk(" -p%d -b%d\n",svc->mc_param.rtds.period,svc->mc_param.rtds.budget);
-
-//                    list_add_tail(&svc->type_elem, &rtds_mc.changed_vcpus);
-                    
                     break;
                 case UNCHANGED:
                     svc->type = UNCHANGED;
-                    replq_remove(ops,svc);
                     printk("vcpu%d is unchanged\n", svc->vcpu->vcpu_id);
-//                    
                     break;
             }
 
@@ -2028,6 +2095,7 @@ rt_dom_cntl(
                 if ( scur == svc->vcpu &&
                      svc->mc_param.action_running_old == MC_ABORT )
                 {
+                    trace_disable_running(svc);
                     svc->running_job->cur_budget = 0; // kill budget
                     printk("***aborting vcpu%d's running job***\n", svc->vcpu->vcpu_id);
                 }
@@ -2053,8 +2121,12 @@ rt_dom_cntl(
                             if ( !check_backlog_guard(ops, svc, 0, 0) )
                                 printk("backlog check failed. not disable jobs on queue\n");
                             else
+                            {
+                                trace_disable_not_running(svc);
                                 printk("backlog checked. disabled jobs on queue\n");
+                                __q_remove(ops, svc); 
                             //old guard, dont disable running
+                            }
                             break;
                     }
                 }
@@ -2063,15 +2135,38 @@ rt_dom_cntl(
             //release new
             if ( svc->type != OLD )
             {
+                s_time_t next_release;
+                s_time_t now = NOW();
 //                printk("new guards:\n");
                 switch ( svc->mc_param.guard_new_type )
                 {
                     case MC_TIME_FROM_MCR:
-//                       printk("time guard\n");
                         set_timer(svc->mc_ng_timer, svc->mc_param.guard_new.t_from_MCR + rtds_mc.recv);
                         break;
-                    case MC_TIMER_FROM_LAST_RELEASE:
-//                        printk("timer guard\n");
+                    case MC_TIMER_FROM_LAST_RELEASE: /* the last cur_deadline + offset; if smaller than now, release right away */
+                        next_release = svc->mc_param.guard_new.t_from_last_release + svc->cur_deadline;
+                        if ( next_release <= now )
+                        {
+                            struct rt_job* job;
+                            printk("release right away because time from last release<=now\n");
+                            svc->active = 1;
+                            if ( svc->type == CHANGED )
+                            {
+                                printk("updating param for NEW\n");
+                                svc->period = svc->mc_param.rtds.period;
+                                svc->budget = svc->mc_param.rtds.budget;
+                            } 
+                            if ( now >= svc->cur_deadline )
+                                rt_update_deadline(now, svc);
+                            if ( !vcpu_on_replq(svc) )
+                                replq_insert(ops, svc);
+                            job = release_job(ops, now, svc);
+                            if ( job != NULL )
+                                runq_insert(ops, job);
+                            trace_enable_vcpu(svc);
+                        }
+                        else
+                            set_timer(svc->mc_ng_timer, next_release);
                         break;
                     case MC_PERIOD:
 //                        printk("period comp\n");
@@ -2252,10 +2347,12 @@ static void mc_og_timer_handler(void *data){
 
     if ( svc->running_job != NULL )
     {
+        trace_disable_running(svc);
         printk("timer: vcpu%d running\n", svc->vcpu->vcpu_id);
         svc->running_job->cur_budget = 0; // kill budget 
     }
 
+    trace_disable_not_running(svc);
     __q_remove(ops, svc); 
 
     printk("timer: aborting vcpu%d at %"PRI_stime"\n", svc->vcpu->vcpu_id, NOW());
@@ -2283,6 +2380,9 @@ struct list_head *iter_job;
         printk("vcpu%d-b=%"PRI_stime" d=%"PRI_stime" ",job->svc->vcpu->vcpu_id, job->cur_budget, job->cur_deadline);
     }
     printk("\n");
+
+    trace_enable_vcpu(svc);
+
     svc->active = 1;
     if ( now >= svc->cur_deadline )
         rt_update_deadline(now, svc);
