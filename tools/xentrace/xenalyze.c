@@ -7641,11 +7641,7 @@ void sched_process(struct pcpu_info *p)
             if(opt.dump_all) {
                 struct {
                     unsigned int vcpuid:16, domid:16;
-//                    unsigned int cur_dl_lo, cur_dl_hi;
-//                    unsigned int cur_bg_lo, cur_bg_hi;
                 } *r = (typeof(r))ri->d;
-//                uint64_t dl = (((uint64_t)r->cur_dl_hi) << 32) + r->cur_dl_lo;
-//                uint64_t bg = (((uint64_t)r->cur_bg_hi) << 32) + r->cur_bg_lo;
                 printf(" %s rtds:dis_not_running d%uv%u\n", ri->dump_header,
                        r->domid, r->vcpuid);
             }
@@ -7654,12 +7650,36 @@ void sched_process(struct pcpu_info *p)
             if(opt.dump_all) {
                 struct {
                     unsigned int vcpuid:16, domid:16;
-//                    unsigned int cur_dl_lo, cur_dl_hi;
-//                    unsigned int cur_bg_lo, cur_bg_hi;
                 } *r = (typeof(r))ri->d;
-//                uint64_t dl = (((uint64_t)r->cur_dl_hi) << 32) + r->cur_dl_lo;
-//                uint64_t bg = (((uint64_t)r->cur_bg_hi) << 32) + r->cur_bg_lo;
                 printf(" %s rtds:vcpu_enable d%uv%u\n", ri->dump_header,
+                       r->domid, r->vcpuid);
+            }
+            break;
+        case TRC_SCHED_CLASS_EVT(RTDS, 9): /* MCR    */
+            if(opt.dump_all)
+                printf(" %s rtds:mcr\n", ri->dump_header);
+            break;
+        case TRC_SCHED_CLASS_EVT(RTDS, 10): /* QUEUED_JOB        */
+            if(opt.dump_all) {
+                struct {
+                    unsigned int vcpuid:16, domid:16;
+                    unsigned int cur_dl_lo, cur_dl_hi;
+                    unsigned int cur_bg_lo, cur_bg_hi;
+                } *r = (typeof(r))ri->d;
+                uint64_t dl = (((uint64_t)r->cur_dl_hi) << 32) + r->cur_dl_lo;
+                uint64_t bg = (((uint64_t)r->cur_bg_hi) << 32) + r->cur_bg_lo;
+
+                printf(" %s rtds:queued_job d%uv%u, deadline = %"PRIu64", "
+                       "budget = %"PRIu64"\n", ri->dump_header,
+                       r->domid, r->vcpuid, dl, bg);
+            }
+            break;
+        case TRC_SCHED_CLASS_EVT(RTDS, 11): /* UNDATE_CHANGED        */
+            if(opt.dump_all) {
+                struct {
+                    unsigned int vcpuid:16, domid:16;
+                } *r = (typeof(r))ri->d;
+                printf(" %s rtds:update_changed d%uv%u\n", ri->dump_header,
                        r->domid, r->vcpuid);
             }
             break;

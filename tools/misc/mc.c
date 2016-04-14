@@ -47,7 +47,7 @@ void set_guard_comp(xen_domctl_sched_guard_t* cur_guard, ezxml_t parent, int typ
     {
         case MC_BUDGET: 
             temp = get_child(parent, "budget");
-            cur_guard->b_comp.budget_thr = atoi(temp->txt);
+            cur_guard->b_comp.budget_thr = atol(temp->txt);
             temp = get_child(parent, "comp");
             if(strcmp(temp->txt, ">=") == 0)
                 cur_guard->b_comp.comp = MC_LARGER_THAN;
@@ -60,7 +60,7 @@ void set_guard_comp(xen_domctl_sched_guard_t* cur_guard, ezxml_t parent, int typ
                 printf("unknown comparator %s\n",temp->txt);
                 error();
             }
-            printf("budget comp %s %d\n",temp->txt, cur_guard->b_comp.budget_thr);
+            printf("budget comp %s %ld\n",temp->txt, cur_guard->b_comp.budget_thr);
             break;
         case MC_BACKLOG:
             temp = get_child(parent, "size");
@@ -263,7 +263,7 @@ int main(int argc, char* argv[]){
 
     ezxml_t xml, v, tmp;
     int i = 0;
-    int domid;
+    int domid, cpu;
     const char* s; //tmp string
 
     if (argc != 2) return fprintf(stderr, "usage: %s xmlfile\n", argv[0]);
@@ -280,6 +280,17 @@ int main(int argc, char* argv[]){
     printf("domain=%d\n",domid);
 
     info.domid = domid;
+
+    s = ezxml_attr(xml,"cpu");
+    if(s == NULL)
+    {
+        printf("CPU id cannot be NULL\n");
+        return 0;
+    }
+    cpu = atoi(s);
+    printf("cpu=%d\n",cpu);
+
+    info.cpu = cpu;
 
     for(v = ezxml_child(xml, "vcpu"); v; v = v->next)
     {
@@ -354,7 +365,7 @@ int main(int argc, char* argv[]){
         printf("guard_new_type = %d\n", params[i].guard_new_type);
         printf("guard_o.t_from_MCR = %ld\n", params[i].guard_old.t_from_MCR);
         printf("guard_o.t_from_last = %ld\n", params[i].guard_old.t_from_last_release);
-        printf("guard_o.budget_thr = %d\n", params[i].guard_old.b_comp.budget_thr);
+        printf("guard_o.budget_thr = %ld\n", params[i].guard_old.b_comp.budget_thr);
         printf("guard_o.comp = %d\n", params[i].guard_old.b_comp.comp);
         printf("guard_o.p_comp.action_old = %d\n", params[i].guard_old.p_comp.action_old_small);
         printf("guard_o.p_comp.action_new = %d\n", params[i].guard_old.p_comp.action_new_small);

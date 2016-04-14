@@ -358,7 +358,7 @@ typedef struct xen_domctl_sched_guard {
 #define MC_SMALLER_THAN 2
 #define MC_EQUAL_TO 3
     struct {
-        int16_t budget_thr;
+        int64_t budget_thr;
         int16_t comp;
     } b_comp;
 
@@ -421,6 +421,7 @@ DEFINE_XEN_GUEST_HANDLE(xen_domctl_schedparam_t);
 typedef struct mode_change_info {
     uint32_t domid;
     uint32_t nr_vcpus;
+    uint32_t cpu; /* the CPU number rtds is running on */
     /* protocol specific */
 } mode_change_info_t;
 
