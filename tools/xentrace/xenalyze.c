@@ -7683,6 +7683,16 @@ void sched_process(struct pcpu_info *p)
                        r->domid, r->vcpuid);
             }
             break;
+        case TRC_SCHED_CLASS_EVT(RTDS, 12): /* BACKLOG_SATISFIED     */
+            if(opt.dump_all) {
+                struct {
+                    unsigned int vcpuid:16, domid:16;
+                    unsigned int runq_len, thr, oldnew, comp;
+                } *r = (typeof(r))ri->d;
+                printf(" %s rtds:backlog satisfied d%uv%u oldnew= %u runq_len= %u thr= %u copm= %u\n", ri->dump_header,
+                       r->domid, r->vcpuid, r->oldnew, r->runq_len, r->thr, r->comp);
+            }
+            break;
         default:
             process_generic(&p->ri);
         }

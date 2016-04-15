@@ -47,6 +47,7 @@
 0x00022809  CPU%(cpu)d  %(tsc)d (+ )  rtds:mcr
 0x0002280a  CPU%(cpu)d  %(tsc)d (+ )  rtds:job_queued     [ dom:vcpu = 0x%(1)08x, cur_deadline = 0x%(3)08x%(2)08x, cur_budget = 0x%(5)08x%(4)08x ]
 0x0002280b  CPU%(cpu)d  %(tsc)d (+ )  rtds:update_changed     [ dom:vcpu = 0x%(1)08x ]
+0x0002280c  CPU%(cpu)d  %(tsc)d (+ )  rtds:backlog_satisfied     [ dom:vcpu = 0x%(1)08x runq_len= %(2)d thr= %(3)d oldnew= %(4)d copm= %(5)d ]
 
 0x00081001  CPU%(cpu)d  %(tsc)d (+%(reltsc)8d)  VMENTRY
 0x00081002  CPU%(cpu)d  %(tsc)d (+%(reltsc)8d)  VMEXIT      [ exitcode = 0x%(1)08x, rIP  = 0x%(2)08x ]
