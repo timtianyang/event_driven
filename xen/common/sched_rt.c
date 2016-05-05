@@ -207,7 +207,6 @@ struct rt_job {
     /* mode change stuff */
     unsigned active;            /* if active in mode change */
     unsigned type;              /* old only, new only, unchanged, changed */
-    unsigned mode;              /* for changed vcpu only. 0:old mode, 1:new mode */
 
     const struct scheduler *ops; /* used in timer handler */
     struct list_head type_elem; /* on the type list */
@@ -242,7 +241,7 @@ struct rt_vcpu {
     /* mode change stuff */
     unsigned active;            /* if active in mode change */
     unsigned type;              /* old only, new only, unchanged, changed */
-    unsigned mode;              /* for changed vcpu only. 0:old mode, 1:new mode */
+    unsigned crit;              /* criticality, used in releasing new */
 
     const struct scheduler *ops; /* used in timer handler */
     struct list_head type_elem; /* on the type list */
@@ -640,7 +639,7 @@ rt_update_deadline(s_time_t now, struct rt_vcpu *svc)
 static void inline
 rt_set_deadline(s_time_t now, struct rt_vcpu *svc)
 {
-    ASSERT(now >= svc->cur_deadline);
+    //ASSERT(now >= svc->cur_deadline);
     ASSERT(svc->period != 0);
 
     svc->cur_deadline = now + svc->period;
@@ -1338,15 +1337,17 @@ rt_alloc_vdata(const struct scheduler *ops, struct vcpu *vc, void *dd)
     if ( !is_idle_vcpu(vc) )
     {
         int i;
-//        printk("alloc v\n");
+
         svc->budget = RTDS_DEFAULT_BUDGET;
         svc->period = RTDS_DEFAULT_PERIOD;
+        svc->crit = 0;
+
         INIT_LIST_HEAD(&svc->jobq);
 
         for ( i = 0; i< 10; i++)
         {
             struct rt_job* job = xzalloc(struct rt_job);
-//            printk("alloc job\n");
+
             INIT_LIST_HEAD(&job->jobq_elem);
             INIT_LIST_HEAD(&job->q_elem);
             list_add_tail(&job->q_elem, depletedq);
@@ -2134,7 +2135,6 @@ rt_dom_cntl(
 
              
             svc->active = 1;
-            svc->mode = 0;
 
             printk("---------\n");
 
@@ -2155,10 +2155,14 @@ rt_dom_cntl(
                     
                     svc->period = svc->mc_param.rtds.period;
                     svc->budget = svc->mc_param.rtds.budget;
+                    svc->crit = svc->mc_param.rtds.crit;
+                    printk("crit %d\n",svc->crit);
                     break;
                 case CHANGED:
                     svc->type = CHANGED;
                     printk("vcpu%d is changed\n", svc->vcpu->vcpu_id);
+                    svc->crit = svc->mc_param.rtds.crit;
+                    printk("crit %d\n",svc->crit);
                     break;
                 case UNCHANGED:
                     svc->type = UNCHANGED;
@@ -2214,7 +2218,30 @@ rt_dom_cntl(
             {
                 s_time_t next_release;
                 s_time_t now = NOW();
-//                printk("new guards:\n");
+
+                /* bypass its guard and release immediately if critical */
+                if ( svc->crit == RTDS_HIGH_CRIT )
+                {
+                    struct rt_job* job;
+                    svc->active = 1;
+                    if ( svc->type == CHANGED )
+                    {
+                        trace_update_changed(svc);
+                        svc->period = svc->mc_param.rtds.period;
+                        svc->budget = svc->mc_param.rtds.budget;
+                    } 
+                    printk("high criticality release\n");
+                    rt_set_deadline(now, svc);
+
+                    if ( !vcpu_on_replq(svc) )
+                        replq_insert(ops, svc);
+                    job = release_job(ops, now, svc);
+                    if ( job != NULL )
+                        runq_insert(ops, job);
+                    trace_enable_vcpu(svc);
+                    tickle = 1;
+                    continue;
+                }
                 switch ( svc->mc_param.guard_new_type )
                 {
                     case MC_TIME_FROM_MCR:
@@ -2247,7 +2274,40 @@ rt_dom_cntl(
                             set_timer(svc->mc_ng_timer, next_release);
                         break;
                     case MC_PERIOD:
-//                        printk("period comp\n");
+                        if ( svc->period < svc->mc_param.rtds.period )
+                        {
+                            next_release = svc->mc_param.guard_new.p_comp.action_old_small == MC_USE_OLD?
+                                            svc->cur_deadline : (svc->cur_deadline - svc->period + svc->mc_param.rtds.period);
+                        }
+                        else if ( svc->period > svc->mc_param.rtds.period )
+                        {
+                            next_release = svc->mc_param.guard_new.p_comp.action_new_small == MC_USE_OLD?
+                                            svc->cur_deadline : (svc->cur_deadline - svc->period + svc->mc_param.rtds.period);
+                        }
+                        else
+                            next_release = svc->cur_deadline;
+ 
+                        if ( next_release >= now )
+                            set_timer(svc->mc_ng_timer, next_release);
+                        else
+                        {
+                            struct rt_job* job;
+                            printk("release now period_release <= now\n");
+                            svc->active = 1;
+
+                            trace_update_changed(svc);
+                            svc->period = svc->mc_param.rtds.period;
+                            svc->budget = svc->mc_param.rtds.budget;
+
+                            rt_set_deadline(now, svc);
+                            if ( !vcpu_on_replq(svc) )
+                                replq_insert(ops, svc);
+                            job = release_job(ops, now, svc);
+                            if ( job != NULL )
+                                runq_insert(ops, job);
+                            trace_enable_vcpu(svc);
+                            tickle = 1;
+                        }
                         break;
                     case MC_BACKLOG:
                         if ( !check_backlog_guard(ops, svc, 1, 0) )
@@ -2389,7 +2449,6 @@ static void mc_og_timer_handler(void *data){
     spin_lock_irq(&prv->lock);
 
     svc->active = 0;
-    //svc->mode = 1;
 
     if ( svc->running_job != NULL )
     {

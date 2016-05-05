@@ -25,6 +25,12 @@ ezxml_t get_child(ezxml_t parent, const char* child_name)
     return temp;
 }
 
+ezxml_t try_get_child(ezxml_t parent, const char* child_name)
+{
+    ezxml_t temp = ezxml_child(parent, child_name);
+    return temp;
+}
+
 const char* get_attr(ezxml_t parent, const char* attr_name)
 {
     const char* temp = ezxml_attr(parent, attr_name);
@@ -42,16 +48,17 @@ const char* get_attr(ezxml_t parent, const char* attr_name)
 void set_guard_comp(xen_domctl_sched_guard_t* cur_guard, ezxml_t parent, int type)
 {
     ezxml_t temp;
+    const char* comp;
 
     switch (type)
     {
         case MC_BUDGET: 
             temp = get_child(parent, "budget");
             cur_guard->b_comp.budget_thr = atol(temp->txt);
-            temp = get_child(parent, "comp");
-            if(strcmp(temp->txt, ">=") == 0)
+            comp = get_attr(temp, "type");
+            if(strcmp(comp, ">=") == 0)
                 cur_guard->b_comp.comp = MC_LARGER_THAN;
-            else if (strcmp(temp->txt, "<=") == 0)
+            else if (strcmp(comp, "<=") == 0)
                 cur_guard->b_comp.comp = MC_SMALLER_THAN;
 /*            else if (strcmp(temp->txt, "=") == 0)
                 cur_guard->b_comp.comp = MC_EQUAL_TO;*/
@@ -60,24 +67,24 @@ void set_guard_comp(xen_domctl_sched_guard_t* cur_guard, ezxml_t parent, int typ
                 printf("unknown comparator %s\n",temp->txt);
                 error();
             }
-            printf("budget comp %s %ld\n",temp->txt, cur_guard->b_comp.budget_thr);
+            printf("budget comp %s %ld\n", comp, cur_guard->b_comp.budget_thr);
             break;
         case MC_BACKLOG:
             temp = get_child(parent, "size");
             cur_guard->buf_comp.len = atoi(temp->txt);
-            temp = get_child(parent, "comp");
-            if(strcmp(temp->txt, ">=") == 0)
+            comp = get_attr(temp, "type");
+            if(strcmp(comp, ">=") == 0)
                 cur_guard->buf_comp.comp = MC_LARGER_THAN;
-            else if (strcmp(temp->txt, "<=") == 0)
+            else if (strcmp(comp, "<=") == 0)
                 cur_guard->buf_comp.comp = MC_SMALLER_THAN;
-            else if (strcmp(temp->txt, "=") == 0)
-                cur_guard->buf_comp.comp = MC_EQUAL_TO;
+//            else if (strcmp(temp->txt, "=") == 0)
+//                cur_guard->buf_comp.comp = MC_EQUAL_TO;
             else
             {
                 printf("unknown comparator %s\n",temp->txt);
                 error();
             }
-            printf("backlog comp %s %d\n",temp->txt, cur_guard->buf_comp.len);
+            printf("backlog comp %s %d\n", comp, cur_guard->buf_comp.len);
             break;
     }            
 }
@@ -192,7 +199,7 @@ void set_vcpu_guard(xen_domctl_schedparam_t* cur, int old_new, int type, ezxml_t
 }
 
 /*
- * set a vcpu's action to disable old, v is the disable_old tag
+ * set a vcpu's action to disable old, dis is the disable_old tag
  */
 void set_vcpu_old_action(xen_domctl_schedparam_t *cur, ezxml_t dis)
 {
@@ -252,6 +259,12 @@ void set_vcpu_param(xen_domctl_schedparam_t *cur, ezxml_t v)
     tmp = get_child(v, "period");
     cur->rtds.period = atoi(tmp->txt);
     printf("p = %d\n", cur->rtds.period);
+    tmp = try_get_child(v, "criticality");
+    if ( tmp != NULL )
+    {
+        cur->rtds.crit = atoi(tmp->txt);
+        printf("crit = %d\n", cur->rtds.crit);
+    }
 }
 
 int main(int argc, char* argv[]){
@@ -371,6 +384,16 @@ int main(int argc, char* argv[]){
         printf("guard_o.p_comp.action_new = %d\n", params[i].guard_old.p_comp.action_new_small);
         printf("guard_o.buf.len = %d\n", params[i].guard_old.buf_comp.len);
         printf("guard_o.buf.comp = %d\n", params[i].guard_old.buf_comp.comp);
+        printf("----\n");
+        printf("guard_n.t_from_MCR = %ld\n", params[i].guard_new.t_from_MCR);
+        printf("guard_n.t_from_last = %ld\n", params[i].guard_new.t_from_last_release);
+        printf("guard_n.budget_thr = %ld\n", params[i].guard_new.b_comp.budget_thr);
+        printf("guard_n.comp = %d\n", params[i].guard_new.b_comp.comp);
+        printf("guard_n.p_comp.action_old = %d\n", params[i].guard_new.p_comp.action_old_small);
+        printf("guard_n.p_comp.action_new = %d\n", params[i].guard_new.p_comp.action_new_small);
+        printf("guard_n.buf.len = %d\n", params[i].guard_new.buf_comp.len);
+        printf("guard_n.buf.comp = %d\n", params[i].guard_new.buf_comp.comp);
+ 
     }
 
 

@@ -349,6 +349,9 @@ DEFINE_XEN_GUEST_HANDLE(xen_domctl_max_vcpus_t);
 typedef struct xen_domctl_sched_rtds {
     uint32_t period;
     uint32_t budget;
+    uint32_t crit;
+#define RTDS_HIGH_CRIT 1
+#define RTDS_LOW_CRIT  2
 } xen_domctl_sched_rtds_t;
 
 typedef struct xen_domctl_sched_guard {
