@@ -189,6 +189,8 @@ tools/misc/gtracestat
 tools/misc/xenlockprof
 tools/misc/lowmemd
 tools/misc/xencov
+tools/misc/mc
+tools/misc/mc_sys
 tools/xentrace/xenalyze
 tools/pygrub/build/*
 tools/python/build/*
