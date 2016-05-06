@@ -36,8 +36,12 @@ const char* get_attr(ezxml_t parent, const char* attr_name)
     return temp;
 }
 
-void extract_type_transition_text(const char* path, char* unchanged,
-                                  char* changed, char* old, char* new)
+/*
+ * extracts the contexts inside of vcpu tags for all types
+ * and set the pointers
+ */
+void extract_type_transition_text(const char* path, char** unchanged,
+                                  char** changed, char** old, char** new)
 {
     FILE * fp;
     char* line = NULL;
@@ -116,29 +120,42 @@ void extract_type_transition_text(const char* path, char* unchanged,
             next_type = 1;
             //printf("next type\n");
     }
-    changed = types[0];
-    unchanged = types[1];
-    new = types[2];
-    old = types[3];
-    printf("extracted changed:\n%s", changed);
-    printf("extracted unchanged:\n%s", unchanged);
-    printf("extracted new:\n%s", new);
-    printf("extracted old:\n%s", old);
+    *changed = types[0];
+    *unchanged = types[1];
+    *new = types[2];
+    *old = types[3];
+    printf("extracted changed:\n%s", *changed);
+    printf("extracted unchanged:\n%s", *unchanged);
+    printf("extracted new:\n%s", *new);
+    printf("extracted old:\n%s", *old);
     fclose(fp);
 }
 
+/*
+ * arg1: sys_xml
+ * arg2: output path, created xmls will be appended with numbers
+ */
 int main(int argc, char* argv[]){
-    ezxml_t xml, trans_tag;
+    ezxml_t xml, trans_tag, vcpu_tag;
     int num_of_trans = 0;
+    int trans_id = 0;
+    int cpu;
+    int domain;
     //const char* s; //temp string
     char *unchanged = NULL, *changed = NULL, *old = NULL, *new = NULL; // points to extracted texts
+    const char* xml_header = "<?xml versdion=\"1.0\"?>";
 
     if ( argc != 3)
         return fprintf(stderr, "usage: %s xmlfile output_path\n", argv[0]);
 
-    extract_type_transition_text(argv[1], unchanged, changed, old, new);
+    extract_type_transition_text(argv[1], &unchanged, &changed, &old, &new);
 
     xml = ezxml_parse_file(argv[1]);
+
+    cpu = atoi(get_attr(xml, "cpu"));
+    printf("rtds is on cpu %d\n", cpu);
+    domain = atoi(get_attr(xml, "domain"));
+    printf("rtds is domain %d\n", domain);
 
     for ( trans_tag = ezxml_child(xml, "trans"); trans_tag; trans_tag = trans_tag->next )
         num_of_trans++;
@@ -148,7 +165,55 @@ int main(int argc, char* argv[]){
 
     printf("mc_sys: there are %d transitions in this sys.\n", num_of_trans);
 
+    for ( trans_tag = ezxml_child(xml, "trans"); trans_tag; trans_tag = trans_tag->next )
+    {
+        FILE *fp;
+        char name[50];
+        char id_str[10];
+
+        /* prepare file to write out */
+        sprintf(id_str, "%d", trans_id++);
+        memcpy(name, argv[2], strlen(argv[2])+1);
+        strcat(name, "sys_trans");
+        strcat(name,id_str);
+        strcat(name,".xml");
+        fp = fopen(name, "w");
+        if ( fp == NULL )
+        {
+            printf("failed to create file %s\n", name);
+            error();
+        }
+
+        /* print header for a transition */
+        fprintf(fp, "%s\n",xml_header);
+        fprintf(fp, "<request domain=\"%d\" cpu =\"%d\">\n", domain, cpu);
+
+        /* writing all vcpus for a transition */
+        for ( vcpu_tag = ezxml_child(trans_tag, "vcpu"); vcpu_tag; vcpu_tag = vcpu_tag->next )
+        {
+            /* get vcpu type and id from transition */
+            const char* vcpu_id = get_attr(vcpu_tag, "id");
+            const char* vcpu_type = get_attr(vcpu_tag, "type");
+
+            /* print per vcpu params */
+            fprintf(fp, "    <vcpu type=\"%s\" id=\"%s\">\n", vcpu_type, vcpu_id);
+
+            if ( strcmp(vcpu_type,"unchanged") == 0 )
+                fprintf(fp, "%s", unchanged);
+            else if ( strcmp(vcpu_type,"changed") == 0 )
+                fprintf(fp, "%s", changed);
+            else if ( strcmp(vcpu_type,"new") == 0 )
+                fprintf(fp, "%s", new);
+            else if ( strcmp(vcpu_type,"old") == 0 )
+                fprintf(fp, "%s", old);
+
+            fprintf(fp, "    </vcpu>\n");
+        }
+        fprintf(fp, "</request>");
+        
+        fclose(fp);
+        printf("created %s\n", name);
+    }
+
     fprintf(stderr, "%s\n", ezxml_error(xml));
-
-
 }
