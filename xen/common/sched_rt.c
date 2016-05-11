@@ -1036,8 +1036,9 @@ check_backlog_guard(const struct scheduler* ops, struct rt_vcpu *svc, int old_ne
             struct rt_job* job;
             s_time_t now = NOW();
             printk("new backlog guard enabling..\n");
-            trace_enable_vcpu(svc);
+
             trace_backlog_satisfied(svc, 1, prv->runq_len, thr, comp);
+            trace_enable_vcpu(svc);
 
             if ( svc->type == CHANGED )
             {
@@ -2254,6 +2255,8 @@ rt_dom_cntl(
                             struct rt_job* job;
                             printk("release right away because time from last release<=now\n");
                             svc->active = 1;
+
+                            trace_enable_vcpu(svc);
                             if ( svc->type == CHANGED )
                             {
                                 trace_update_changed(svc);
@@ -2266,9 +2269,11 @@ rt_dom_cntl(
                                 replq_insert(ops, svc);
                             job = release_job(ops, now, svc);
                             if ( job != NULL )
+                            {
                                 runq_insert(ops, job);
-                            trace_enable_vcpu(svc);
-                            tickle = 1;
+                                if ( job->cur_deadline < rt_vcpu(scur)->running_job->cur_deadline )
+                                    tickle = 1;
+                            }
                         }
                         else
                             set_timer(svc->mc_ng_timer, next_release);
@@ -2294,6 +2299,7 @@ rt_dom_cntl(
                             struct rt_job* job;
                             printk("release now period_release <= now\n");
                             svc->active = 1;
+                            trace_enable_vcpu(svc);
 
                             trace_update_changed(svc);
                             svc->period = svc->mc_param.rtds.period;
@@ -2304,9 +2310,11 @@ rt_dom_cntl(
                                 replq_insert(ops, svc);
                             job = release_job(ops, now, svc);
                             if ( job != NULL )
+                            {
                                 runq_insert(ops, job);
-                            trace_enable_vcpu(svc);
-                            tickle = 1;
+                                if ( job->cur_deadline < rt_vcpu(scur)->running_job->cur_deadline )
+                                    tickle = 1;
+                            }
                         }
                         break;
                     case MC_BACKLOG:
@@ -2327,7 +2335,19 @@ rt_dom_cntl(
         
         printk("mc recv %"PRI_stime"\n", rtds_mc.recv);
         if ( tickle )
+        {
             cpu_raise_softirq(cpu, SCHEDULE_SOFTIRQ);
+            {
+            struct {
+                unsigned cpu:16, pad:16;
+                } d;
+                d.cpu = cpu;
+                d.pad = 0;
+                trace_var(TRC_RTDS_TICKLE, 1,
+                          sizeof(d),
+                          (unsigned char *)&d);
+            }
+        }
         break;
     }
     return rc;
@@ -2418,7 +2438,6 @@ static void repl_timer_handler(void *data){
         else
             runq_tickle(ops, svc);
         */
-
         tickle = 1;
         list_del(&svc->replq_elem);
         deadline_replq_insert(svc, &svc->replq_elem, replq);
@@ -2461,6 +2480,16 @@ static void mc_og_timer_handler(void *data){
 
     printk("timer: aborting vcpu%d at %"PRI_stime"\n", svc->vcpu->vcpu_id, NOW());
     spin_unlock_irq(&prv->lock);
+    {
+        struct {
+            unsigned cpu:16, pad:16;
+        } d;
+        d.cpu = svc->vcpu->processor;
+        d.pad = 0;
+        trace_var(TRC_RTDS_TICKLE, 1,
+                  sizeof(d),
+                  (unsigned char *)&d);
+    }
     cpu_raise_softirq(svc->vcpu->processor, SCHEDULE_SOFTIRQ);
 }
 
@@ -2513,6 +2542,16 @@ printk("RunQueue after release:\n");
     }
     printk("\n");
     spin_unlock_irq(&prv->lock);
+    {
+        struct {
+            unsigned cpu:16, pad:16;
+        } d;
+        d.cpu = svc->vcpu->processor;
+        d.pad = 0;
+        trace_var(TRC_RTDS_TICKLE, 1,
+                  sizeof(d),
+                  (unsigned char *)&d);
+    }
     cpu_raise_softirq(svc->vcpu->processor, SCHEDULE_SOFTIRQ);
     printk("timer: enabling vcpu%d at %"PRI_stime"\n", svc->vcpu->vcpu_id, now);
 }
