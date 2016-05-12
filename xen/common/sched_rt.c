@@ -2187,29 +2187,36 @@ rt_dom_cntl(
 
                 //printk("action_not_runnig_old: %d\n", svc->mc_param.action_not_running_old);
                 
-                if ( vcpu_has_job_onq(svc) && svc->mc_param.action_not_running_old == MC_USE_GUARD )
+                if ( vcpu_has_job_onq(svc) )
                 {
-                    printk("old guards:\n");
-                    switch ( svc->mc_param.guard_old_type )
+                    if ( svc->mc_param.action_not_running_old == MC_USE_GUARD )
                     {
-                        case MC_TIME_FROM_MCR:
-                            printk("time guard\n");
-                            set_timer(svc->mc_og_timer, svc->mc_param.guard_old.t_from_MCR + rtds_mc.recv);
-                            break;
-                        case MC_BUDGET:
-                            printk("budget comp\n");
-                            check_budget_guard(ops, svc);                                
-                            break;
-                        case MC_BACKLOG:    
-                            if ( !check_backlog_guard(ops, svc, 0, 0) )
-                                printk("backlog check failed. not disable jobs on queue\n");
-                            else
-                            {
-                                printk("backlog checked. disabled jobs on queue\n");
-                                //__q_remove(ops, svc); 
-                            //old guard, dont disable running
-                            }
-                            break;
+                        printk("old guards:\n");
+                        switch ( svc->mc_param.guard_old_type )
+                        {
+                            case MC_TIME_FROM_MCR:
+                                printk("time guard\n");
+                                set_timer(svc->mc_og_timer, svc->mc_param.guard_old.t_from_MCR + rtds_mc.recv);
+                                break;
+                            case MC_BUDGET:
+                                printk("budget comp\n");
+                                check_budget_guard(ops, svc);                                
+                                break;
+                            case MC_BACKLOG:    
+                                if ( !check_backlog_guard(ops, svc, 0, 0) )
+                                    printk("backlog check failed. not disable jobs on queue\n");
+                                else
+                                {
+                                    printk("backlog checked. disabled jobs on queue\n");
+                                    //__q_remove(ops, svc); 
+                                //old guard, dont disable running
+                                }
+                                break;
+                        }
+                    }
+                    else if ( svc->mc_param.action_not_running_old == MC_ABORT )
+                    {
+                        //remove not running jobs for this vcpu
                     }
                 }
                 
