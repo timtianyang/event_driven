@@ -4,6 +4,13 @@
 #include <xc_private.h>
 #include "ezxml.h"
 
+struct vcpu{
+    int id;
+    uint32_t budget;
+    uint32_t period;
+    int type; 
+};
+
 void error(void){
     exit(1);
 }
@@ -35,6 +42,116 @@ const char* get_attr(ezxml_t parent, const char* attr_name)
     }
     return temp;
 }
+/*
+char* get_vcpu_type(int src, int dst, int vcpu_id)
+{
+
+}
+*/
+/*
+ * create two sorted(id) list of vcpus based on modes
+ * and then return a new list of vcpus that has type fields
+ * root tag is the parent of mode tags
+ */
+struct vcpu* get_vcpus_from_transition(ezxml_t root, int src, int dst)
+{
+    int num_v_src = 0, num_v_dst = 0;//, num_v_dst = 0;
+    int i = 0, j = 0;
+    ezxml_t src_mode, dst_mode, temp, v;
+    struct vcpu *src_v, *dst_v;
+    /* find the src mode and dst mode first */
+    printf("src = mode%d dst = mode%d\n",src, dst);
+    for( temp = ezxml_child(root, "mode"); temp; temp = temp->next )
+    {
+        if ( atoi(get_attr(temp, "id")) == src )
+            src_mode = temp;
+        else if ( atoi(get_attr(temp, "id")) == dst )
+            dst_mode = temp;
+    }
+    if ( src_mode == NULL || dst_mode == NULL )
+    {
+        printf("failed to find src or dst mode in the system\n");
+        error();
+    }
+    /* construct src mode vcpu list */
+    for( v = ezxml_child(src_mode, "vcpu"); v; v = v->next )
+        num_v_src++;
+    printf("src mode has %d vcpus\n", num_v_src);
+ 
+    src_v = malloc(sizeof(struct vcpu) * num_v_src);
+    /* get an un-sorted list first */
+    for( v = ezxml_child(src_mode, "vcpu"); v; v = v->next )
+    { 
+        struct vcpu* cur_v = &src_v[i++];
+        cur_v->id = atoi(get_attr(v, "id"));
+        cur_v->budget = atol(get_attr(v, "budget"));
+        cur_v->period = atol(get_attr(v, "period"));
+    }
+
+    printf("now sort\n");
+    /* bubble sort */
+    for ( i = 0; i < num_v_src; i++ )
+    {
+        for ( j = i + 1; j < num_v_src; j++ )
+        {
+            if ( src_v[j].id < src_v[i].id )
+            {   /* swap them */
+                
+                struct vcpu t = src_v[j];
+                printf("swap [j]=%d [i]=%d\n",src_v[j].id,src_v[i].id);
+                src_v[j] = src_v[i];
+                src_v[i] = t;
+                
+            }
+        }
+    }
+    printf("sorted src mode vcpus:\n");
+    for ( i = 0; i < num_v_src; i++)
+    {
+        printf("vcpu%d ",src_v[i].id);
+    }
+    printf("\n");
+
+    /* construct dst mode vcpu list */
+    for( v = ezxml_child(dst_mode, "vcpu"); v; v = v->next )
+        num_v_src++;
+    printf("dst mode has %d vcpus\n", num_v_dst);
+ 
+    dst_v = malloc(sizeof(struct vcpu) * num_v_dst);
+    /* get an un-sorted list first */
+    for( v = ezxml_child(dst_mode, "vcpu"); v; v = v->next )
+    { 
+        struct vcpu* cur_v = &dst_v[i++];
+        cur_v->id = atoi(get_attr(v, "id"));
+        cur_v->budget = atol(get_attr(v, "budget"));
+        cur_v->period = atol(get_attr(v, "period"));
+    }
+
+    printf("now sort\n");
+    /* bubble sort */
+    for ( i = 0; i < num_v_dst; i++ )
+    {
+        for ( j = i + 1; j < num_v_dst; j++ )
+        {
+            if ( dst_v[j].id < dst_v[i].id )
+            {   /* swap them */
+                
+                struct vcpu t = dst_v[j];
+                printf("swap [j]=%d [i]=%d\n", dst_v[j].id, dst_v[i].id);
+                dst_v[j] = dst_v[i];
+                dst_v[i] = t;
+                
+            }
+        }
+    }
+    printf("sorted dst mode vcpus:\n");
+    for ( i = 0; i < num_v_dst; i++)
+    {
+        printf("vcpu%d ",dst_v[i].id);
+    }
+    printf("\n");
+    return NULL;
+}
 
 /*
  * extracts the contexts inside of vcpu tags for all types
@@ -61,7 +178,7 @@ void extract_type_transition_text(const char* path, char** unchanged,
     while (getline(&line, &len, fp) != -1) {
         line[strlen(line) - 1] = '\0'; //remove linefeed
         //printf("%s", line);
-        if (strcmp(line, "    <rules>") == 0)
+        if (strcmp(line, "<rules>") == 0)
         {
             rules_found = 1;
             printf("found rules\n");
@@ -82,7 +199,7 @@ void extract_type_transition_text(const char* path, char** unchanged,
     {
             int pos = 0;
             int next_type_index = 0;
-            while ( next_type || strcmp(line, "        </vcpu>") != 0)
+            while ( next_type || strcmp(line, "    </vcpu>") != 0)
             {
                 if (getline(&line, &len, fp) != -1)
                 {
@@ -103,7 +220,7 @@ void extract_type_transition_text(const char* path, char** unchanged,
                     }
                     if (next_type)
                         next_type = 0;
-                    else if ( strcmp(line, "        </vcpu>\n") != 0 )
+                    else if ( strcmp(line, "    </vcpu>\n") != 0 )
                     {
                         strcpy(types[next_type_index] + pos,line);
                         pos += strlen(line);
@@ -136,8 +253,8 @@ void extract_type_transition_text(const char* path, char** unchanged,
  * arg2: output path, created xmls will be appended with numbers
  */
 int main(int argc, char* argv[]){
-    ezxml_t xml, trans_tag, vcpu_tag;
-    int num_of_trans = 0;
+    ezxml_t xml, trans_tag, vcpu_tag, mode_tag;
+    int num_of_trans = 0, num_of_modes = 0;
     int trans_id = 0;
     int cpu;
     int domain;
@@ -145,17 +262,31 @@ int main(int argc, char* argv[]){
     char *unchanged = NULL, *changed = NULL, *old = NULL, *new = NULL; // points to extracted texts
     const char* xml_header = "<?xml versdion=\"1.0\"?>";
 
-    if ( argc != 3)
-        return fprintf(stderr, "usage: %s xmlfile output_path\n", argv[0]);
+    if ( argc != 4)
+        return fprintf(stderr, "usage: %s rules sys output_path\n", argv[0]);
 
     extract_type_transition_text(argv[1], &unchanged, &changed, &old, &new);
 
-    xml = ezxml_parse_file(argv[1]);
+    xml = ezxml_parse_file(argv[2]);
+    if ( xml == NULL )
+    {
+        printf("Failed to open the sys file\n");
+        error();
+    }
 
     cpu = atoi(get_attr(xml, "cpu"));
     printf("rtds is on cpu %d\n", cpu);
     domain = atoi(get_attr(xml, "domain"));
     printf("rtds is domain %d\n", domain);
+
+    /* get number of modes and transitions*/
+    for ( mode_tag = ezxml_child(xml, "mode"); mode_tag; mode_tag = mode_tag->next )
+        num_of_modes++;
+
+    if ( num_of_modes == 0 )
+        return fprintf(stderr, "system xml file cannot have 0 number of modes\n");
+
+    printf("mc_sys: there are %d modes in this sys.\n", num_of_modes);
 
     for ( trans_tag = ezxml_child(xml, "trans"); trans_tag; trans_tag = trans_tag->next )
         num_of_trans++;
@@ -165,6 +296,10 @@ int main(int argc, char* argv[]){
 
     printf("mc_sys: there are %d transitions in this sys.\n", num_of_trans);
 
+get_vcpus_from_transition(xml, 0, 1);
+    return 0;
+
+    /* iterate through all transitions, write one xml per transition */
     for ( trans_tag = ezxml_child(xml, "trans"); trans_tag; trans_tag = trans_tag->next )
     {
         FILE *fp;

@@ -282,6 +282,11 @@ int main(int argc, char* argv[]){
     if (argc != 2) return fprintf(stderr, "usage: %s xmlfile\n", argv[0]);
 
     xml = ezxml_parse_file(argv[1]);
+    if ( xml == NULL )
+    {
+        printf("Failed to open the sys file\n");
+        error();
+    }
 
     s = ezxml_attr(xml,"domain");
     if(s == NULL)
