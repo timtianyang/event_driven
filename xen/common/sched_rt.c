@@ -738,13 +738,11 @@ __q_remove(const struct scheduler* ops, struct rt_vcpu *svc)
     //ASSERT( __vcpu_on_q(svc) );
     struct list_head *iter, *tmp;
     struct rt_private *prv = rt_priv(ops);
-    //struct list_head *depletedq = rt_depletedq(ops);
 
     list_for_each_safe ( iter, tmp, &svc->jobq )
     {
         struct rt_job* job = jobq_elem(iter);
 
-//        printk("r1\n");
         if ( svc->running_job != job )
         {
             trace_disable_not_running_job(job);
@@ -975,11 +973,17 @@ replq_reinsert(const struct scheduler *ops, struct rt_vcpu *svc)
 /*
  * for a vcpu that uses backlog as guards
  * disables queued vcpus and/or running vcpus
+ * while checking, release and disable jobs accordingly
+ * return 1 if backlog has been satisfied
  * return 1 if something has been disabled/emabled
  */
 static inline int
 check_backlog_guard(const struct scheduler* ops, struct rt_vcpu *svc, int old_new, int disable_running)
 {
+#define MC_NOT_DISABLE_RUNNING 0
+#define MC_DISABLE_RUNNING 1
+#define MC_BKL_OLD 0
+#define MC_BKL_NEW 1
 //    struct list_head *iter, *tmp;
     struct rt_private *prv = rt_priv(ops);
     //struct list_head *depletedq = rt_depletedq(ops);
@@ -1021,13 +1025,15 @@ check_backlog_guard(const struct scheduler* ops, struct rt_vcpu *svc, int old_ne
             trace_backlog_satisfied(svc, 0, prv->runq_len, thr, comp);
             printk("old backlog guard disabling..\n");
             svc->active = 0;
+
+            //disable the running job of this vcpu
             if ( svc->running_job != NULL && disable_running )
             {
                 trace_disable_running_job(svc->running_job);
-                printk("bkg: vcpu%d running\n", svc->vcpu->vcpu_id);
-                svc->running_job->cur_budget = 0; // kill budget 
+                printk("bkg: disable vcpu%d running\n", svc->vcpu->vcpu_id);
+                svc->running_job->cur_budget = 0;
             }
-
+            //disable queued jobs for this vcpu
             if ( vcpu_has_job_onq(svc) )
                 __q_remove(ops, svc);
         }
@@ -2139,10 +2145,14 @@ rt_dom_cntl(
 
             printk("---------\n");
 
+            /*
+             * stop releasing all relevant vcpus right away
+             * For the transient period, all will be disabled,
+             * even for unchanged vcpus.
+             */
+            svc->active = 0;
             if ( vcpu_on_replq(svc) )
                 replq_remove(ops,svc);
-
-            svc->active = 0;
 
             switch (svc->mc_param.type)
             {
@@ -2163,6 +2173,7 @@ rt_dom_cntl(
                     svc->type = CHANGED;
                     printk("vcpu%d is changed\n", svc->vcpu->vcpu_id);
                     svc->crit = svc->mc_param.rtds.crit;
+                    /* apply changed criticality here so it will take effect below */
                     printk("crit %d\n",svc->crit);
                     break;
                 case UNCHANGED:
@@ -2174,6 +2185,7 @@ rt_dom_cntl(
             //disable old
             if ( svc->type != NEW )
             {
+                //disable running
                 if ( scur == svc->vcpu &&
                      svc->mc_param.action_running_old == MC_ABORT )
                 {
@@ -2186,7 +2198,8 @@ rt_dom_cntl(
                     //printk("it's not running\n");
 
                 //printk("action_not_runnig_old: %d\n", svc->mc_param.action_not_running_old);
-                
+               
+                //remove queued jobs 
                 if ( vcpu_has_job_onq(svc) )
                 {
                     if ( svc->mc_param.action_not_running_old == MC_USE_GUARD )
@@ -2203,7 +2216,7 @@ rt_dom_cntl(
                                 check_budget_guard(ops, svc);                                
                                 break;
                             case MC_BACKLOG:    
-                                if ( !check_backlog_guard(ops, svc, 0, 0) )
+                                if ( !check_backlog_guard(ops, svc, MC_BKL_OLD, MC_NOT_DISABLE_RUNNING) )
                                     printk("backlog check failed. not disable jobs on queue\n");
                                 else
                                 {
@@ -2217,6 +2230,7 @@ rt_dom_cntl(
                     else if ( svc->mc_param.action_not_running_old == MC_ABORT )
                     {
                         //remove not running jobs for this vcpu
+                        __q_remove(ops, svc);
                     }
                 }
                 
@@ -2227,29 +2241,65 @@ rt_dom_cntl(
                 s_time_t next_release;
                 s_time_t now = NOW();
 
-                /* bypass its guard and release immediately if critical */
-                if ( svc->crit == RTDS_HIGH_CRIT )
+                /*
+                 * bypass its guard and release immediately if critical
+                 * This pass is also for those vcpus that don't have new
+                 * release guard, which means they should be released
+                 * immediately.
+                 */
+                if ( svc->crit == RTDS_HIGH_CRIT ||
+                    svc->mc_param.guard_new_type == MC_NO_NEW_GUARD )
                 {
                     struct rt_job* job;
+                    int missed = 0; /* set if the unchanged vcpu has missed a release */
                     svc->active = 1;
+
+                    if ( svc->type == UNCHANGED && svc->cur_deadline < now )
+                    {
+                        /*
+                         * unchanged vcpu needs to stick to its original
+                         * period where as others needs to reset the starting
+                         * point below. if it missed a release, release below.
+                         * otherwise don't release.
+                         */
+                        rt_update_deadline(now, svc);
+                        missed = 1;
+                    }
+
                     if ( svc->type == CHANGED )
                     {
                         trace_update_changed(svc);
+                        /* crit is applied above already */
                         svc->period = svc->mc_param.rtds.period;
                         svc->budget = svc->mc_param.rtds.budget;
                     } 
-                    printk("high criticality release\n");
-                    rt_set_deadline(now, svc);
+                    printk("high criticality or no new guard release\n");
+
+                    /* unchanged vcpu is already set above */
+                    if ( svc->type != UNCHANGED )
+                        rt_set_deadline(now, svc);
 
                     if ( !vcpu_on_replq(svc) )
                         replq_insert(ops, svc);
-                    job = release_job(ops, now, svc);
-                    if ( job != NULL )
-                        runq_insert(ops, job);
-                    trace_enable_vcpu(svc);
-                    tickle = 1;
+
+                    /*
+                     * spcial case for unchanged, only if it missed, release here
+                     * for others, always release
+                     */
+                    if ( svc->type != UNCHANGED || missed )
+                    {
+                        job = release_job(ops, now, svc);
+                        if ( job != NULL )
+                            runq_insert(ops, job);
+                        trace_enable_vcpu(svc);
+
+                        if ( job->cur_deadline < rt_vcpu(scur)->running_job->cur_deadline )
+                            tickle = 1;
+                    }
                     continue;
                 }
+
+                /* not-critical vcpus/those with guards go through the normal pass */
                 switch ( svc->mc_param.guard_new_type )
                 {
                     case MC_TIME_FROM_MCR:
@@ -2325,7 +2375,7 @@ rt_dom_cntl(
                         }
                         break;
                     case MC_BACKLOG:
-                        if ( !check_backlog_guard(ops, svc, 1, 0) )
+                        if ( !check_backlog_guard(ops, svc, MC_BKL_NEW, MC_NOT_DISABLE_RUNNING) )
                         {
                             list_add_tail(&svc->guard_elem, &rtds_mc.backlog_guardq);
                             //printk("backlog new guard failed. add to queue\n");

@@ -406,12 +406,14 @@ typedef struct xen_domctl_schedparam_vcpu {
 #define MC_BUDGET 3
 #define MC_PERIOD 4
 #define MC_BACKLOG 5
+#define MC_NO_NEW_GUARD 6
     /*
-     * 0: time from MCR
-     * 1: timer triggered from MCR to change/disable/release
-     * 2: remaining budget comparision
-     * 3: old/new period comparision
-     * 4: backlog threshold comparision
+     * 1: time from MCR
+     * 2: timer triggered from MCR to change/disable/release
+     * 3: remaining budget comparision
+     * 4: old/new period comparision
+     * 5: backlog threshold comparision
+     * 6: no new guard, release right away
      */
     uint16_t guard_old_type;
     uint16_t guard_new_type;
