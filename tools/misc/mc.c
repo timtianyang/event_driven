@@ -192,6 +192,9 @@ void set_vcpu_guard(xen_domctl_schedparam_t* cur, int old_new, int type, ezxml_t
 
             set_guard_comp(cur_guard, parent, MC_BACKLOG);
             break;
+        case MC_NO_NEW_GUARD:
+            cur->guard_new_type = MC_NO_NEW_GUARD;
+            break;
         default:
             printf("unknow guard type: %d\n",type);
             error();
