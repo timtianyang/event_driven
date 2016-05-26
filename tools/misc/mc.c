@@ -101,6 +101,8 @@ int get_guard_type(const char* type)
         return MC_PERIOD;
     if (strcmp(type, "backlog") == 0)
         return MC_BACKLOG;
+     if (strcmp(type, "none") == 0)
+        return MC_NO_NEW_GUARD;   
     printf("unrecognized guard type %s\n", type);
     error();
     return -1;

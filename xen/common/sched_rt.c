@@ -2247,6 +2247,11 @@ rt_dom_cntl(
                  * release guard, which means they should be released
                  * immediately.
                  */
+
+                /*
+                 * if all vcpus are unchanged and have the same period,
+                 * the new release order might be changed randomly
+                 */
                 if ( svc->crit == RTDS_HIGH_CRIT ||
                     svc->mc_param.guard_new_type == MC_NO_NEW_GUARD )
                 {
@@ -2293,7 +2298,7 @@ rt_dom_cntl(
                             runq_insert(ops, job);
                         trace_enable_vcpu(svc);
 
-                        if ( job->cur_deadline < rt_vcpu(scur)->running_job->cur_deadline )
+                        if ( scur == NULL || job->cur_deadline < rt_vcpu(scur)->running_job->cur_deadline )
                             tickle = 1;
                     }
                     continue;
@@ -2328,7 +2333,7 @@ rt_dom_cntl(
                             if ( job != NULL )
                             {
                                 runq_insert(ops, job);
-                                if ( job->cur_deadline < rt_vcpu(scur)->running_job->cur_deadline )
+                                if ( scur == NULL || job->cur_deadline < rt_vcpu(scur)->running_job->cur_deadline )
                                     tickle = 1;
                             }
                         }
@@ -2369,7 +2374,7 @@ rt_dom_cntl(
                             if ( job != NULL )
                             {
                                 runq_insert(ops, job);
-                                if ( job->cur_deadline < rt_vcpu(scur)->running_job->cur_deadline )
+                                if ( scur == NULL || job->cur_deadline < rt_vcpu(scur)->running_job->cur_deadline )
                                     tickle = 1;
                             }
                         }
@@ -2559,10 +2564,12 @@ static void mc_ng_timer_handler(void *data){
     const struct scheduler *ops = svc->ops;
     struct rt_private *prv = rt_priv(ops);
     struct rt_job* job;
-struct list_head *runq = rt_runq(ops);
-struct list_head *iter_job;
+    int cpu = svc->vcpu->processor;
+    struct vcpu* scur = curr_on_cpu(cpu); 
+//struct list_head *runq = rt_runq(ops);
+//struct list_head *iter_job;
     spin_lock_irq(&prv->lock);
-
+/*
     printk("RunQueue before release:\n");
     list_for_each( iter_job, runq )
     {
@@ -2570,7 +2577,7 @@ struct list_head *iter_job;
         printk("vcpu%d-b=%"PRI_stime" d=%"PRI_stime" ",job->svc->vcpu->vcpu_id, job->cur_budget, job->cur_deadline);
     }
     printk("\n");
-
+*/
     if ( svc->type == CHANGED )
     {
         trace_update_changed(svc);
@@ -2590,7 +2597,12 @@ struct list_head *iter_job;
     job = release_job(ops, now, svc);
         
     if ( job != NULL )
+    {
         runq_insert(ops, job);
+        if ( scur == NULL || job->cur_deadline < rt_vcpu(scur)->running_job->cur_deadline )
+            cpu_raise_softirq(cpu, SCHEDULE_SOFTIRQ);
+    }
+/*
 printk("RunQueue after release:\n");
     list_for_each( iter_job, runq )
     {
@@ -2598,6 +2610,7 @@ printk("RunQueue after release:\n");
         printk("vcpu%d-b=%"PRI_stime" d=%"PRI_stime" ",job->svc->vcpu->vcpu_id, job->cur_budget, job->cur_deadline);
     }
     printk("\n");
+*/
     spin_unlock_irq(&prv->lock);
     {
         struct {
@@ -2609,7 +2622,7 @@ printk("RunQueue after release:\n");
                   sizeof(d),
                   (unsigned char *)&d);
     }
-    cpu_raise_softirq(svc->vcpu->processor, SCHEDULE_SOFTIRQ);
+    
     printk("timer: enabling vcpu%d at %"PRI_stime"\n", svc->vcpu->vcpu_id, now);
 }
 
