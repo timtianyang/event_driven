@@ -1239,6 +1239,7 @@ rt_alloc_pdata(const struct scheduler *ops, int cpu)
             return NULL;
 
         init_timer(prv->repl_timer, repl_timer_handler, (void *)ops, cpu);
+        printk("repl timer init on cpu %d\n", cpu);
     }
 
     /* 1 indicates alloc. succeed in schedule.c */
@@ -2269,6 +2270,7 @@ rt_dom_cntl(
                          */
                         rt_update_deadline(now, svc);
                         missed = 1;
+                        /* need to debug here */
                     }
 
                     if ( svc->type == CHANGED )
@@ -2298,7 +2300,7 @@ rt_dom_cntl(
                             runq_insert(ops, job);
                         trace_enable_vcpu(svc);
 
-                        if ( scur == NULL || job->cur_deadline < rt_vcpu(scur)->running_job->cur_deadline )
+                        if ( is_idle_vcpu(scur) || job->cur_deadline < rt_vcpu(scur)->running_job->cur_deadline )
                             tickle = 1;
                     }
                     continue;
@@ -2333,7 +2335,7 @@ rt_dom_cntl(
                             if ( job != NULL )
                             {
                                 runq_insert(ops, job);
-                                if ( scur == NULL || job->cur_deadline < rt_vcpu(scur)->running_job->cur_deadline )
+                                if ( is_idle_vcpu(scur) || job->cur_deadline < rt_vcpu(scur)->running_job->cur_deadline )
                                     tickle = 1;
                             }
                         }
@@ -2374,7 +2376,7 @@ rt_dom_cntl(
                             if ( job != NULL )
                             {
                                 runq_insert(ops, job);
-                                if ( scur == NULL || job->cur_deadline < rt_vcpu(scur)->running_job->cur_deadline )
+                                if ( is_idle_vcpu(scur) || job->cur_deadline < rt_vcpu(scur)->running_job->cur_deadline )
                                     tickle = 1;
                             }
                         }
@@ -2430,11 +2432,16 @@ static void repl_timer_handler(void *data){
     //const struct rt_vcpu* scurr = rt_vcpu(current);
 //    struct list_head *iter_job;
     struct rt_vcpu *svc;
+    struct vcpu* scur;
     long flag;
-    LIST_HEAD(tmp_replq);
+    //LIST_HEAD(tmp_replq);
     int tickle = 0;
 
     spin_lock_irqsave(&prv->lock, flag);
+
+    /* timer has been initialized on the right cpu already */
+    scur = current;
+
 //    printk("t\n");
     /*
      * Do the replenishment and move replenished vcpus
@@ -2450,16 +2457,20 @@ static void repl_timer_handler(void *data){
         if ( now < svc->cur_deadline )
             break;
 
-        list_del(&svc->replq_elem);
+        //list_del(&svc->replq_elem);
         if ( svc->active == 0 )
             continue;
         rt_update_deadline(now, svc);
-        list_add(&svc->replq_elem, &tmp_replq);
+        //list_add(&svc->replq_elem, &tmp_replq);
 
         job = release_job(ops, now, svc);
         
         if ( job != NULL )
+        {
             runq_insert(ops, job);
+            if ( is_idle_vcpu(scur) || job->cur_deadline < rt_vcpu(scur)->running_job->cur_deadline )
+                            tickle = 1;
+        }
 /*    printk("Global RunQueue info:\n");
     list_for_each( iter_job, runq )
     {
@@ -2482,11 +2493,11 @@ static void repl_timer_handler(void *data){
      * If an updated vcpu was depleted and on the runqueue, tickle it.
      * Finally, reinsert the vcpus back to replenishement events list.
      */
-    list_for_each_safe ( iter, tmp, &tmp_replq )
+/*    list_for_each_safe ( iter, tmp, &tmp_replq )
     {
         svc = replq_elem(iter);
 
-        /*if ( !is_idle_vcpu(scurr->vcpu) )
+        if ( !is_idle_vcpu(scurr->vcpu) )
         {
             if ( scurr != svc &&
                 !list_empty(runq) )
@@ -2499,12 +2510,12 @@ static void repl_timer_handler(void *data){
         }
         else
             runq_tickle(ops, svc);
-        */
+        
         tickle = 1;
         list_del(&svc->replq_elem);
         deadline_replq_insert(svc, &svc->replq_elem, replq);
     }
-
+*/
     if ( tickle )
         runq_tickle(ops, svc);
 
@@ -2599,7 +2610,7 @@ static void mc_ng_timer_handler(void *data){
     if ( job != NULL )
     {
         runq_insert(ops, job);
-        if ( scur == NULL || job->cur_deadline < rt_vcpu(scur)->running_job->cur_deadline )
+        if ( is_idle_vcpu(scur) || job->cur_deadline < rt_vcpu(scur)->running_job->cur_deadline )
             cpu_raise_softirq(cpu, SCHEDULE_SOFTIRQ);
     }
 /*
