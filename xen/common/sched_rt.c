@@ -823,7 +823,7 @@ get_job(const struct scheduler* ops)
     }
     else
     {
-        //printk("not_enough_jobs!!\n");
+        printk("not_enough_jobs!!\n");
         job = NULL;
     }
     return job;
@@ -2141,9 +2141,6 @@ rt_dom_cntl(
 
             svc->mc_param = local_params;
 
-             
-            svc->active = 1;
-
             printk("---------\n");
 
             /*
@@ -2281,7 +2278,7 @@ rt_dom_cntl(
                         svc->budget = svc->mc_param.rtds.budget;
                     } 
                     printk("high criticality or no new guard release\n");
-
+                    printk("vcpu%d p=%"PRI_stime"\n",svc->vcpu->vcpu_id,svc->period);
                     /* unchanged vcpu is already set above */
                     if ( svc->type != UNCHANGED )
                         rt_set_deadline(now, svc);
@@ -2459,7 +2456,10 @@ static void repl_timer_handler(void *data){
 
         //list_del(&svc->replq_elem);
         if ( svc->active == 0 )
+        {
+            printk("timer triggered when vcpu%d is not active\n",svc->vcpu->vcpu_id);
             continue;
+        }
         rt_update_deadline(now, svc);
         //list_add(&svc->replq_elem, &tmp_replq);
 
@@ -2471,6 +2471,9 @@ static void repl_timer_handler(void *data){
             if ( is_idle_vcpu(scur) || job->cur_deadline < rt_vcpu(scur)->running_job->cur_deadline )
                             tickle = 1;
         }
+
+        list_del(&svc->replq_elem);
+        deadline_replq_insert(svc, &svc->replq_elem, replq);
 /*    printk("Global RunQueue info:\n");
     list_for_each( iter_job, runq )
     {
