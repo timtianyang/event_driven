@@ -2309,8 +2309,8 @@ rt_dom_cntl(
                     case MC_TIME_FROM_MCR:
                         set_timer(svc->mc_ng_timer, svc->mc_param.guard_new.t_from_MCR + rtds_mc.recv);
                         break;
-                    case MC_TIMER_FROM_LAST_RELEASE: /* the last cur_deadline + offset; if smaller than now, release right away */
-                        next_release = svc->mc_param.guard_new.t_from_last_release + svc->cur_deadline;
+                    case MC_TIMER_FROM_LAST_RELEASE: /* the last cur_deadline - period + offset; if smaller than now, release right away */
+                        next_release = svc->mc_param.guard_new.t_from_last_release + svc->cur_deadline - svc->period;
                         if ( next_release <= now )
                         {
                             struct rt_job* job;

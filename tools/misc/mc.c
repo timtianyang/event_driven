@@ -264,12 +264,9 @@ void set_vcpu_param(xen_domctl_schedparam_t *cur, ezxml_t v)
     tmp = get_child(v, "period");
     cur->rtds.period = atoi(tmp->txt);
     printf("p = %d\n", cur->rtds.period);
-    tmp = try_get_child(v, "criticality");
-    if ( tmp != NULL )
-    {
-        cur->rtds.crit = atoi(tmp->txt);
-        printf("crit = %d\n", cur->rtds.crit);
-    }
+    tmp = get_child(v, "criticality");
+    cur->rtds.crit = atoi(tmp->txt);
+    printf("crit = %d\n", cur->rtds.crit);
 }
 
 int main(int argc, char* argv[]){
