@@ -994,14 +994,16 @@ check_backlog_guard(const struct scheduler* ops, struct rt_vcpu *svc, int old_ne
                             svc->mc_param.guard_old.buf_comp.comp; 
     int satisfied = 0;
 
+    int vcpu_running = !is_idle_vcpu(curr_on_cpu(svc->vcpu->processor));
+
     switch (comp)
     {
     case MC_LARGER_THAN:
-        if ( prv->runq_len >= thr )
+        if ( prv->runq_len + vcpu_running >= thr )
             satisfied = 1;
         break;
     case MC_SMALLER_THAN:
-        if ( prv->runq_len <= thr )
+        if ( prv->runq_len + vcpu_running <= thr )
             satisfied = 1;
         break;
     }
@@ -1081,7 +1083,7 @@ scan_backlog_new_list(const struct scheduler* ops)
     list_for_each_safe ( iter, tmp, &rtds_mc.backlog_guardq )
     {
         svc = guard_elem(iter);
-        if ( check_backlog_guard(ops, svc, 1, 0) )
+        if ( check_backlog_guard(ops, svc, MC_BKL_NEW, MC_NOT_DISABLE_RUNNING) )
         {
             tickle = 1;
             list_del_init(&svc->guard_elem);
@@ -2037,7 +2039,9 @@ rt_context_saved(const struct scheduler *ops, struct vcpu *vc)
     }
 
     svc->running_job = NULL;
-    scan_backlog_new_list(ops);
+    if ( scan_backlog_new_list(ops) )
+        cpu_raise_softirq(vc->processor, SCHEDULE_SOFTIRQ);
+        
 out:
     vcpu_schedule_unlock_irq(lock, vc);
 }
