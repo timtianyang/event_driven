@@ -77,11 +77,11 @@ xc_sched_rtds_mc_set(
         params,
         sizeof(*params) * nr,
         XC_HYPERCALL_BUFFER_BOUNCE_IN);
-    printf("before bounce_pre\n");
+//    printf("before bounce_pre\n");
     if ( xc_hypercall_bounce_pre(xch, params) )
         return -1;
 
-    printf("after bouce_pre\n");
+//    printf("after bouce_pre\n");
     domctl.cmd = XEN_DOMCTL_scheduler_op;
     domctl.domain = (domid_t) domid;
     domctl.u.scheduler_op.sched_id = XEN_SCHEDULER_RTDS;
@@ -89,11 +89,11 @@ xc_sched_rtds_mc_set(
     domctl.u.scheduler_op.u.mode_change.info = info; 
 
     set_xen_guest_handle(domctl.u.scheduler_op.u.mode_change.params, params);
-    printf("in xc_mc_seti before do_domctl\n");
+//    printf("in xc_mc_seti before do_domctl\n");
     rc = do_domctl(xch, &domctl);
-    printf("after do_domctl");
+//    printf("after do_domctl");
     xc_hypercall_bounce_post(xch, params);
-    printf("after hypercall_bounce\n");
+//    printf("after hypercall_bounce\n");
     return rc;
 }
 

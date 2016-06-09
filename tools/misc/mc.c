@@ -373,7 +373,7 @@ int main(int argc, char* argv[]){
         printf("----\n");
     }
     printf("+++++end of mc parsing+++++\n");
-
+/*
     for (i=0; i<info.nr_vcpus; i++)
     {
         printf("-------\n");
@@ -402,12 +402,12 @@ int main(int argc, char* argv[]){
         printf("guard_n.buf.comp = %d\n", params[i].guard_new.buf_comp.comp);
  
     }
-
+*/
 
     i = fprintf(stderr, "%s\n", ezxml_error(xml));
     ezxml_free(xml);
 
-    printf("opening interface...\n");
+//    printf("opening interface...\n");
     xci = xc_interface_open(0, 0, 0);
 
     if ( !xci )
@@ -417,13 +417,13 @@ int main(int argc, char* argv[]){
         return 1;
     }
 
-    printf("before going to xc\n");
+//    printf("before going to xc\n");
     xc_sched_rtds_mc_set(xci, domid, info, params);
 
-    printf("after xc in main\n");
+//    printf("after xc in main\n");
     
 out:
     xc_interface_close(xci);
-    printf("closed xc interface....\n");
+//    printf("closed xc interface....\n");
     return 0;
 }

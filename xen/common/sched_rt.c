@@ -2281,8 +2281,7 @@ rt_dom_cntl(
                         svc->period = svc->mc_param.rtds.period;
                         svc->budget = svc->mc_param.rtds.budget;
                     } 
-                    printk("high criticality or no new guard release\n");
-                    printk("vcpu%d p=%"PRI_stime"\n",svc->vcpu->vcpu_id,svc->period);
+
                     /* unchanged vcpu is already set above */
                     if ( svc->type != UNCHANGED )
                         rt_set_deadline(now, svc);
@@ -2296,6 +2295,8 @@ rt_dom_cntl(
                      */
                     if ( svc->type != UNCHANGED || missed )
                     {
+                        printk("high criticality or no new guard release\n");
+
                         job = release_job(ops, now, svc);
                         if ( job != NULL )
                             runq_insert(ops, job);
