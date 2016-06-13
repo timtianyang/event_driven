@@ -2223,8 +2223,6 @@ rt_dom_cntl(
                                 else
                                 {
                                     printk("backlog checked. disabled jobs on queue\n");
-                                    //__q_remove(ops, svc); 
-                                //old guard, dont disable running
                                 }
                                 break;
                         }
@@ -2233,6 +2231,11 @@ rt_dom_cntl(
                     {
                         //remove not running jobs for this vcpu
                         __q_remove(ops, svc);
+                    }
+                    else if ( svc->mc_param.action_not_running_old == MC_UPDATE )
+                    {
+                        //update budget of queued jobs
+
                     }
                 }
                 

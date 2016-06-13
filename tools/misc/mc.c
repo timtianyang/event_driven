@@ -236,6 +236,15 @@ void set_vcpu_old_action(xen_domctl_schedparam_t *cur, ezxml_t dis)
         cur->action_not_running_old = MC_ABORT;
         printf("action_not_running_old is abort\n");
     }
+    else if (strcmp(tmp->txt, "update") == 0)
+    {
+        long dbudget = atol(get_attr(tmp, "dbudget"));
+        long ddeadline = atol(get_attr(tmp, "ddeadline"));
+        cur->dbudget = dbudget;
+        cur->ddeadline = ddeadline;
+        printf("delta budget is %ld\n",cur->dbudget);
+        printf("delta deadline is %ld\n",cur->ddeadline);
+    }
     else if(strcmp(tmp->txt, "guard") == 0)
     {
         int old_guard_type;

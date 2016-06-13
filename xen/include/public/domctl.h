@@ -395,6 +395,7 @@ typedef struct xen_domctl_schedparam_vcpu {
 #define MC_ABORT 1
 #define MC_CONTINUE 2
 #define MC_USE_GUARD 3
+#define MC_UPDATE 4
     uint16_t action_running_old;
     /* 3 use guard, 2 is continue, 1 is abort */
 
@@ -407,6 +408,10 @@ typedef struct xen_domctl_schedparam_vcpu {
 #define MC_PERIOD 4
 #define MC_BACKLOG 5
 #define MC_NO_NEW_GUARD 6
+
+    int64_t dbudget;
+    int64_t ddeadline;
+
     /*
      * 1: time from MCR
      * 2: timer triggered from MCR to change/disable/release
