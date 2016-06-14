@@ -242,6 +242,7 @@ void set_vcpu_old_action(xen_domctl_schedparam_t *cur, ezxml_t dis)
         long ddeadline = atol(get_attr(tmp, "ddeadline"));
         cur->dbudget = dbudget;
         cur->ddeadline = ddeadline;
+        cur->action_not_running_old = MC_UPDATE;
         printf("delta budget is %ld\n",cur->dbudget);
         printf("delta deadline is %ld\n",cur->ddeadline);
     }

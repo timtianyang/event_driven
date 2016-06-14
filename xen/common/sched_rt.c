@@ -203,19 +203,6 @@ struct rt_job {
     int on_runq;
     /* up-pointers */
     struct rt_vcpu *svc;
-
-    /* mode change stuff */
-    unsigned active;            /* if active in mode change */
-    unsigned type;              /* old only, new only, unchanged, changed */
-
-    const struct scheduler *ops; /* used in timer handler */
-    struct list_head type_elem; /* on the type list */
-    struct list_head guard_elem; /* on a list of guards */
-
-    struct timer *mc_og_timer; /* timer to handle action */ 
-    struct timer *mc_ng_timer; /* timer to handle action */
-
-    xen_domctl_schedparam_t mc_param; /* MC paramters */
 };
 
 /*
@@ -913,6 +900,30 @@ runq_insert(const struct scheduler *ops, struct rt_job *job)
     prv->runq_len++;
 //    printk("insert vcpu%d's job to runq\n",job->svc->vcpu->vcpu_id);
 }
+
+/*
+ * Update all queued jobs of this vcpu with new budget and new
+ * deadline
+ */
+static inline void
+__q_update(const struct scheduler* ops, struct rt_vcpu *svc)
+{
+    struct list_head *iter, *tmp;
+    struct rt_private *prv = rt_priv(ops);
+
+    list_for_each_safe ( iter, tmp, &svc->jobq )
+    {
+        struct rt_job* job = jobq_elem(iter);
+
+        list_del_init(&job->q_elem);
+        job->cur_budget += job->svc->mc_param.dbudget;
+        job->cur_deadline += job->svc->mc_param.ddeadline;
+        prv->runq_len--;
+        runq_insert(ops, job);
+    }
+}
+
+
 
 static void
 replq_insert(const struct scheduler *ops, struct rt_vcpu *svc)
@@ -2235,6 +2246,13 @@ rt_dom_cntl(
                     else if ( svc->mc_param.action_not_running_old == MC_UPDATE )
                     {
                         //update budget of queued jobs
+                        __q_update(ops,svc);
+                        list_for_each( iter_job, rt_runq(ops) )
+                        {
+                            struct rt_job* job = __q_elem(iter_job);
+                            //trace_queued_job(job);
+                            printk("vcpu%d-b=%"PRI_stime" d=%"PRI_stime" ",job->svc->vcpu->vcpu_id, job->cur_budget, job->cur_deadline);
+                        }
 
                     }
                 }
