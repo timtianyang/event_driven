@@ -709,9 +709,7 @@ vcpu_recycle_job(const struct scheduler* ops, struct rt_job* job)
 
     job->svc->num_jobs--;
     list_del_init(&job->jobq_elem); /* remove from a vcpu jobq */
-//        printk("r2\n");
     list_del_init(&job->q_elem);
-//        printk("r3\n");
     list_add_tail(&job->q_elem, depletedq);
     
     job->on_runq = 0; 
@@ -1452,13 +1450,13 @@ rt_vcpu_insert(const struct scheduler *ops, struct vcpu *vc)
         struct vcpu *v;
 
         sdom = list_entry(iter, struct rt_dom, sdom_elem);
-        printk("\tdomain: %d\n", sdom->dom->domain_id);
-        printk("now updating budget\n");
+//        printk("\tdomain: %d\n", sdom->dom->domain_id);
+//        printk("now updating budget\n");
         for_each_vcpu ( sdom->dom, v )
         {
             svc = rt_vcpu(v);
             svc->budget = RTDS_DEFAULT_PERIOD/prv->nr_vcpus;
-            printk("vcpu%d budget is now %"PRI_stime"\n", v->vcpu_id,svc->budget);
+//            printk("vcpu%d budget is now %"PRI_stime"\n", v->vcpu_id,svc->budget);
         }
     }
     vcpu_schedule_unlock_irq(lock, vc);
@@ -2335,6 +2333,7 @@ rt_dom_cntl(
                     if ( !vcpu_on_replq(svc) )
                         replq_insert(ops, svc);
 
+                    trace_enable_vcpu(svc);
                     /*
                      * spcial case for unchanged, only if it missed, release here
                      * for others, always release
@@ -2346,7 +2345,6 @@ rt_dom_cntl(
                         job = release_job(ops, now, svc);
                         if ( job != NULL )
                             runq_insert(ops, job);
-                        trace_enable_vcpu(svc);
 
                         if ( is_idle_vcpu(scur) || job->cur_deadline < rt_vcpu(scur)->running_job->cur_deadline )
                             tickle = 1;
