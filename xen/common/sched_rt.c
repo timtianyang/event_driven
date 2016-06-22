@@ -184,6 +184,7 @@ struct rt_private {
     cpumask_t tickled;          /* cpus been tickled */
     struct timer *repl_timer;   /* replenishment timer */
 
+    int nr_vcpus;
     int runq_len;
 };
 
@@ -491,6 +492,7 @@ rt_dump(const struct scheduler *ops)
             svc = rt_vcpu(v);
             rt_dump_vcpu(ops, svc);
         }
+        printk("there are %d vcpus\n",prv->nr_vcpus);
     }
 
  out:
@@ -1191,6 +1193,7 @@ rt_init(struct scheduler *ops)
     cpumask_clear(&prv->tickled);
 
     ops->sched_data = prv;
+    prv->nr_vcpus = 0;
 
     /*
      * The timer initialization will happen later when
@@ -1223,6 +1226,7 @@ rt_deinit(struct scheduler *ops)
     xfree(prv->repl_timer);
 
     ops->sched_data = NULL;
+    prv->nr_vcpus = 0;
     xfree(prv);
 }
 
@@ -1383,7 +1387,7 @@ rt_alloc_vdata(const struct scheduler *ops, struct vcpu *vc, void *dd)
         if ( (svc->mc_og_timer == NULL) )
             return NULL;
         init_timer(svc->mc_ng_timer, mc_ng_timer_handler, (void *)svc, cpu);
-        init_timer(svc->mc_og_timer, mc_og_timer_handler, (void *)svc, cpu); 
+        init_timer(svc->mc_og_timer, mc_og_timer_handler, (void *)svc, cpu);
     }
     SCHED_STAT_CRANK(vcpu_alloc);
 
@@ -1416,6 +1420,9 @@ rt_vcpu_insert(const struct scheduler *ops, struct vcpu *vc)
     struct rt_vcpu *svc = rt_vcpu(vc);
     s_time_t now = NOW();
     spinlock_t *lock;
+    struct rt_dom *sdom;
+    struct rt_private *prv = rt_priv(ops);
+    struct list_head *iter;
 
     BUG_ON( is_idle_vcpu(vc) );
 
@@ -1427,7 +1434,7 @@ rt_vcpu_insert(const struct scheduler *ops, struct vcpu *vc)
 
 //    if ( !__vcpu_on_q(svc) && vcpu_runnable(vc) )
     
-
+    prv->nr_vcpus++;
     if ( vcpu_runnable(vc) )
     {
         struct rt_job* job = release_job(ops, now, svc);
@@ -1437,6 +1444,21 @@ rt_vcpu_insert(const struct scheduler *ops, struct vcpu *vc)
         {
             runq_insert(ops, job);
 
+        }
+    }
+
+    list_for_each( iter, &prv->sdom )
+    {
+        struct vcpu *v;
+
+        sdom = list_entry(iter, struct rt_dom, sdom_elem);
+        printk("\tdomain: %d\n", sdom->dom->domain_id);
+        printk("now updating budget\n");
+        for_each_vcpu ( sdom->dom, v )
+        {
+            svc = rt_vcpu(v);
+            svc->budget = RTDS_DEFAULT_PERIOD/prv->nr_vcpus;
+            printk("vcpu%d budget is now %"PRI_stime"\n", v->vcpu_id,svc->budget);
         }
     }
     vcpu_schedule_unlock_irq(lock, vc);
@@ -1453,6 +1475,7 @@ rt_vcpu_remove(const struct scheduler *ops, struct vcpu *vc)
     struct rt_vcpu * const svc = rt_vcpu(vc);
     struct rt_dom * const sdom = svc->sdom;
     spinlock_t *lock;
+    struct rt_private *prv = rt_priv(ops);
 
     SCHED_STAT_CRANK(vcpu_remove);
 printk("removing vcpu%d\n",vc->vcpu_id);
@@ -1464,6 +1487,8 @@ printk("removing vcpu%d\n",vc->vcpu_id);
 
     if ( vcpu_on_replq(svc) )
         replq_remove(ops,svc);
+
+    prv->nr_vcpus--;
 
     vcpu_schedule_unlock_irq(lock, vc);
 }
