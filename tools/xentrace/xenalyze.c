@@ -7580,13 +7580,14 @@ void sched_process(struct pcpu_info *p)
                     unsigned int vcpuid:16, domid:16;
                     unsigned int cur_dl_lo, cur_dl_hi;
                     unsigned int cur_bg_lo, cur_bg_hi;
+                    unsigned int mode;
                 } *r = (typeof(r))ri->d;
                 uint64_t dl = (((uint64_t)r->cur_dl_hi) << 32) + r->cur_dl_lo;
                 uint64_t bg = (((uint64_t)r->cur_bg_hi) << 32) + r->cur_bg_lo;
-
+                unsigned int m = r->mode;
                 printf(" %s rtds:schedule d%uv%u, deadline = %"PRIu64", "
-                       "budget = %"PRIu64"\n", ri->dump_header,
-                       r->domid, r->vcpuid, dl, bg);
+                       "budget = %"PRIu64" mode = %u\n", ri->dump_header,
+                       r->domid, r->vcpuid, dl, bg, m);
             }
             break;
         case TRC_SCHED_CLASS_EVT(RTDS, 3): /* BUDGET_BURN      */
@@ -7665,13 +7666,14 @@ void sched_process(struct pcpu_info *p)
                     unsigned int vcpuid:16, domid:16;
                     unsigned int cur_dl_lo, cur_dl_hi;
                     unsigned int cur_bg_lo, cur_bg_hi;
+                    unsigned int mode;
                 } *r = (typeof(r))ri->d;
                 uint64_t dl = (((uint64_t)r->cur_dl_hi) << 32) + r->cur_dl_lo;
                 uint64_t bg = (((uint64_t)r->cur_bg_hi) << 32) + r->cur_bg_lo;
-
+                unsigned int m = r->mode;
                 printf(" %s rtds:queued_job d%uv%u, deadline = %"PRIu64", "
-                       "budget = %"PRIu64"\n", ri->dump_header,
-                       r->domid, r->vcpuid, dl, bg);
+                       "budget = %"PRIu64", mode = %u\n", ri->dump_header,
+                       r->domid, r->vcpuid, dl, bg, m);
             }
             break;
         case TRC_SCHED_CLASS_EVT(RTDS, 11): /* UNDATE_CHANGED        */

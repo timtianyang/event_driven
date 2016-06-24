@@ -204,6 +204,8 @@ struct rt_job {
     int on_runq;
     /* up-pointers */
     struct rt_vcpu *svc;
+
+    int current_mode; /* a value inheritaed from svc when released */
 };
 
 /*
@@ -239,6 +241,8 @@ struct rt_vcpu {
     struct timer *mc_ng_timer; /* timer to handle action */
 
     xen_domctl_schedparam_t mc_param; /* MC paramters */
+
+    int current_mode; /* this value increments when a mode change happens */
 };
 
 /*
@@ -524,6 +528,7 @@ static inline void trace_queued_job(struct rt_job *job)
         unsigned vcpu:16, dom:16;
         unsigned cur_deadline_lo, cur_deadline_hi;
         unsigned cur_budget_lo, cur_budget_hi;
+        unsigned mode;
     } d;
 
     d.dom = job->svc->vcpu->domain->domain_id;
@@ -532,6 +537,7 @@ static inline void trace_queued_job(struct rt_job *job)
     d.cur_deadline_hi = (unsigned) (job->cur_deadline >> 32);
     d.cur_budget_lo = (unsigned) job->cur_budget;
     d.cur_budget_hi = (unsigned) (job->cur_budget >> 32);
+    d.mode = (unsigned) job->current_mode;
     trace_var(TRC_RTDS_JOB_QUEUED, 1,
         sizeof(d),
         (unsigned char *) &d);
@@ -833,6 +839,7 @@ release_job(const struct scheduler* ops, s_time_t now, struct rt_vcpu* svc)
         job->cur_deadline = svc->cur_deadline;
         job->on_runq = 0;
         job_vcpu_insert(svc, job);
+        job->current_mode = svc->current_mode;
 
             /* TRACE */
         {
@@ -1763,6 +1770,7 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
                 unsigned vcpu:16, dom:16;
                 unsigned cur_deadline_lo, cur_deadline_hi;
                 unsigned cur_budget_lo, cur_budget_hi;
+                unsigned mode;
             } d;
             
         if( !is_idle_vcpu(snext->vcpu) )
@@ -1774,6 +1782,7 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
             d.cur_deadline_hi = (unsigned) (picked_job->cur_deadline >> 32);
             d.cur_budget_lo = (unsigned) picked_job->cur_budget;
             d.cur_budget_hi = (unsigned) (picked_job->cur_budget >> 32);
+            d.mode = (unsigned) picked_job->current_mode;
             trace_var(TRC_RTDS_SCHEDULE, 1,
                       sizeof(d),
                       (unsigned char *) &d);
@@ -2189,6 +2198,13 @@ rt_dom_cntl(
             svc->active = 0;
             if ( vcpu_on_replq(svc) )
                 replq_remove(ops,svc);
+
+            /*
+             * this kinda assumes that all running vcpus must be specified
+             * in the mode change file.
+             */
+            svc->current_mode++;
+
 
             switch (svc->mc_param.type)
             {
