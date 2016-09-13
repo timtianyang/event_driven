@@ -1789,7 +1789,7 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
         }
         else
         {
-            d.vcpu = snext->vcpu->domain->max_vcpus;
+            d.vcpu = 64;//assuming the max nr of vcpus is 64
             d.dom = snext->vcpu->domain->domain_id;
             d.cur_deadline_lo = 0;
             d.cur_deadline_hi = 0;
