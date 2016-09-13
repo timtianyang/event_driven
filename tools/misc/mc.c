@@ -10,6 +10,8 @@
 #define MC_NO "0"
 #define MC_YES "1"
 
+//#define MC_DEBUG
+
 void error(void){
     exit(1);
 }
@@ -67,7 +69,9 @@ void set_guard_comp(xen_domctl_sched_guard_t* cur_guard, ezxml_t parent, int typ
                 printf("unknown comparator %s\n",temp->txt);
                 error();
             }
+            #ifdef MC_DEBUG
             printf("budget comp %s %ld\n", comp, cur_guard->b_comp.budget_thr);
+            #endif
             break;
         case MC_BACKLOG:
             temp = get_child(parent, "size");
@@ -84,7 +88,9 @@ void set_guard_comp(xen_domctl_sched_guard_t* cur_guard, ezxml_t parent, int typ
                 printf("unknown comparator %s\n",temp->txt);
                 error();
             }
+            #ifdef MC_DEBUG
             printf("backlog comp %s %d\n", comp, cur_guard->buf_comp.len);
+            #endif
             break;
     }            
 }
@@ -128,7 +134,9 @@ void set_vcpu_guard(xen_domctl_schedparam_t* cur, int old_new, int type, ezxml_t
             temp = get_child(parent, "time");
             cur_guard->t_from_MCR = atol(temp->txt);
 
+            #ifdef MC_DEBUG
             printf("time from mcr %ld\n",cur_guard->t_from_MCR);
+            #endif
             break;
         case MC_TIMER_FROM_LAST_RELEASE:
             if(!old_new)
@@ -138,7 +146,9 @@ void set_vcpu_guard(xen_domctl_schedparam_t* cur, int old_new, int type, ezxml_t
             temp = get_child(parent, "timer");
             cur_guard->t_from_last_release = atol(temp->txt);
 
+            #ifdef MC_DEBUG
             printf("timer from last %ld\n",cur_guard->t_from_last_release);
+            #endif
             break;
         case MC_BUDGET:
             if(!old_new)
@@ -157,12 +167,16 @@ void set_vcpu_guard(xen_domctl_schedparam_t* cur, int old_new, int type, ezxml_t
             if(strcmp(temp->txt, "old") == 0)
             {
                 cur_guard->p_comp.action_old_small = MC_USE_OLD;
+                #ifdef MC_DEBUG
                 printf("period: action old smaller use old\n");
+                #endif
             }
             else if (strcmp(temp->txt, "new") == 0)
             {
                 cur_guard->p_comp.action_old_small = MC_USE_NEW;
+                #ifdef MC_DEBUG
                 printf("period: action old smaller use new\n");
+                #endif
             }
             else
             {
@@ -173,12 +187,16 @@ void set_vcpu_guard(xen_domctl_schedparam_t* cur, int old_new, int type, ezxml_t
             if(strcmp(temp->txt, "old") == 0)
             {
                 cur_guard->p_comp.action_new_small = MC_USE_OLD;
+                #ifdef MC_DEBUG
                 printf("period: action new smaller use old\n");
+                #endif
             }
             else if (strcmp(temp->txt, "new") == 0)
             {
                 cur_guard->p_comp.action_new_small = MC_USE_NEW;
+                #ifdef MC_DEBUG
                 printf("period: action new smaller use new\n");
+                #endif
             }
             else
             {
@@ -212,12 +230,16 @@ void set_vcpu_old_action(xen_domctl_schedparam_t *cur, ezxml_t dis)
     if(strcmp(tmp->txt, "continue") == 0)
     {
         cur->action_running_old = MC_CONTINUE;
+        #ifdef MC_DEBUG
         printf("action_running_old is continue\n");
+        #endif
     }
     else if(strcmp(tmp->txt, "abort") == 0)
     {
         cur->action_running_old = MC_ABORT;
+        #ifdef MC_DEBUG
         printf("action_running_old is abort\n");
+        #endif
     }
     else
     {
@@ -229,12 +251,16 @@ void set_vcpu_old_action(xen_domctl_schedparam_t *cur, ezxml_t dis)
     if(strcmp(tmp->txt, "continue") == 0)
     {
         cur->action_not_running_old = MC_CONTINUE;
+        #ifdef MC_DEBUG
         printf("action_not_running_old is continue\n");
+        #endif
     }
     else if(strcmp(tmp->txt, "abort") == 0)
     {
         cur->action_not_running_old = MC_ABORT;
+        #ifdef MC_DEBUG
         printf("action_not_running_old is abort\n");
+        #endif
     }
     else if (strcmp(tmp->txt, "update") == 0)
     {
@@ -243,15 +269,19 @@ void set_vcpu_old_action(xen_domctl_schedparam_t *cur, ezxml_t dis)
         cur->dbudget = dbudget;
         cur->ddeadline = ddeadline;
         cur->action_not_running_old = MC_UPDATE;
+        #ifdef MC_DEBUG
         printf("delta budget is %ld\n",cur->dbudget);
         printf("delta deadline is %ld\n",cur->ddeadline);
+        #endif
     }
     else if(strcmp(tmp->txt, "guard") == 0)
     {
         int old_guard_type;
         cur->action_not_running_old = MC_USE_GUARD;
+        #ifdef MC_DEBUG
         printf("action_not_running_old is use guard\n");
         printf("guard_old:\n");
+        #endif
         tmp = get_child(dis, "guard_old");
         old_guard_type = get_guard_type(get_attr(tmp, "type"));
         set_vcpu_guard(cur, 0, old_guard_type, tmp);
@@ -270,13 +300,17 @@ void set_vcpu_param(xen_domctl_schedparam_t *cur, ezxml_t v)
 {
     ezxml_t tmp = get_child(v, "budget");
     cur->rtds.budget = atoi(tmp->txt);
-    printf("b = %d ", cur->rtds.budget);
+    
+    
     tmp = get_child(v, "period");
     cur->rtds.period = atoi(tmp->txt);
-    printf("p = %d\n", cur->rtds.period);
     tmp = get_child(v, "criticality");
     cur->rtds.crit = atoi(tmp->txt);
+    #ifdef MC_DEBUG
+    printf("b = %d ", cur->rtds.budget);
+    printf("p = %d\n", cur->rtds.period);
     printf("crit = %d\n", cur->rtds.crit);
+    #endif
 }
 
 int main(int argc, char* argv[]){
@@ -306,9 +340,11 @@ int main(int argc, char* argv[]){
         printf("Domain id cannot be NULL\n");
         return 0;
     }
+    
     domid = atoi(s);
+    #ifdef MC_DEBUG
     printf("domain=%d\n",domid);
-
+    #endif
     info.domid = domid;
 
     s = ezxml_attr(xml,"cpu");
@@ -318,8 +354,9 @@ int main(int argc, char* argv[]){
         return 0;
     }
     cpu = atoi(s);
+    #ifdef MC_DEBUG
     printf("cpu=%d\n",cpu);
-
+    #endif
     info.cpu = cpu;
 
     for(v = ezxml_child(xml, "vcpu"); v; v = v->next)
@@ -327,7 +364,9 @@ int main(int argc, char* argv[]){
         info.nr_vcpus++; 
     }
 
+    #ifdef MC_DEBUG
     printf("%d of vcpus specified in this file\n", info.nr_vcpus);
+    #endif
     /* done calculating size */
     params = malloc((sizeof(xen_domctl_schedparam_t)) * info.nr_vcpus);
 
@@ -340,10 +379,13 @@ int main(int argc, char* argv[]){
 
         s = get_attr(v, "id");        
         cur->vcpuid = atoi(s);
+        #ifdef MC_DEBUG
         printf("vcpu %s is ", s);
-
+        #endif
         s = get_attr(v, "type");
+        #ifdef MC_DEBUG
         printf("%s\n",s);
+        #endif
 
         if( strcmp(s,"new") == 0 )
             cur->type = NEW;
@@ -360,7 +402,9 @@ int main(int argc, char* argv[]){
                 tmp = get_child(v, "release_new");
                 tmp = get_child(tmp, "guard_new");
                 new_guard_type = get_guard_type(get_attr(tmp, "type"));
+                #ifdef MC_DEBUG
                 printf("guard_new:\n");
+                #endif
                 set_vcpu_guard(cur, 1, new_guard_type, tmp);
                 set_vcpu_param(cur,v);
                 break;
@@ -375,14 +419,20 @@ int main(int argc, char* argv[]){
                 set_vcpu_old_action(cur,tmp);
                 tmp = get_child(v, "release_new");
                 tmp = get_child(tmp, "guard_new");
+                #ifdef MC_DEBUG
                 printf("guard_new:\n");
+                #endif
                 new_guard_type = get_guard_type(get_attr(tmp, "type"));
                 set_vcpu_guard(cur, 1, new_guard_type, tmp);
                 break;
         }
+        #ifdef MC_DEBUG
         printf("----\n");
+        #endif
     }
+    #ifdef MC_DEBUG
     printf("+++++end of mc parsing+++++\n");
+    #endif
 /*
     for (i=0; i<info.nr_vcpus; i++)
     {
