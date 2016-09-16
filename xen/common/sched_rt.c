@@ -145,6 +145,10 @@
 #define TRC_RTDS_UPDATE_CHANGED   TRC_SCHED_CLASS_EVT(RTDS, 11)
 #define TRC_RTDS_BLG_SATISFIED    TRC_SCHED_CLASS_EVT(RTDS, 12)
 
+#define TRC_RTDS_SCHED_TIME       TRC_SCHED_CLASS_EVT(RTDS, 13)
+#define TRC_RTDS_CONTEXT_TIME     TRC_SCHED_CLASS_EVT(RTDS, 14)
+#define TRC_RTDS_MC_TIME          TRC_SCHED_CLASS_EVT(RTDS, 15)
+#define TRC_RTDS_REPL_TIME        TRC_SCHED_CLASS_EVT(RTDS, 16)
 
  /*
   * Useful to avoid too many cpumask_var_t on the stack.
@@ -268,6 +272,60 @@ struct mc_helper {
     const struct scheduler* ops;
     struct rt_vcpu* svc;
 };
+
+static inline void trace_sched_time(struct vcpu *svc, s_time_t time)
+{
+    struct __packed {
+            unsigned vcpu:16, dom:16;
+            uint64_t time;
+        } d;
+        d.dom = svc->domain->domain_id;
+        d.vcpu = svc->vcpu_id;
+        d.time = (uint64_t) time;
+
+        trace_var(TRC_RTDS_SCHED_TIME, 1,
+                  sizeof(d),
+                  (unsigned char *) &d);
+}
+
+static inline void trace_context_time(struct vcpu *svc, s_time_t time)
+{
+    struct __packed {
+            unsigned vcpu:16, dom:16;
+            uint64_t time;
+        } d;
+        d.dom = svc->domain->domain_id;
+        d.vcpu = svc->vcpu_id;
+        d.time = (uint64_t) time;
+
+        trace_var(TRC_RTDS_CONTEXT_TIME, 1,
+                  sizeof(d),
+                  (unsigned char *) &d);
+}
+
+static inline void trace_mc_time(s_time_t time)
+{
+    struct __packed {
+            uint64_t time;
+        } d;
+        d.time = (uint64_t) time;
+
+        trace_var(TRC_RTDS_MC_TIME, 1,
+                  sizeof(d),
+                  (unsigned char *) &d);
+}
+
+static inline void trace_repl_time(s_time_t time)
+{
+    struct __packed {
+            uint64_t time;
+        } d;
+        d.time = (uint64_t) time;
+
+        trace_var(TRC_RTDS_REPL_TIME, 1,
+                  sizeof(d),
+                  (unsigned char *) &d);
+}
 
 /*
  * Useful inline functions
@@ -1768,6 +1826,7 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
                       sizeof(d),
                       (unsigned char *) &d);
         }
+        trace_sched_time(snext->vcpu, NOW() - now);
     }
 
     return ret;
@@ -2024,6 +2083,8 @@ rt_context_saved(const struct scheduler *ops, struct vcpu *vc)
     struct rt_vcpu *svc = rt_vcpu(vc);
     spinlock_t *lock = vcpu_schedule_lock_irq(vc);
 
+    s_time_t start = NOW();
+
     __clear_bit(__RTDS_scheduled, &svc->flags);
     /* not insert idle vcpu to runq */
     if ( is_idle_vcpu(vc) )
@@ -2056,6 +2117,7 @@ rt_context_saved(const struct scheduler *ops, struct vcpu *vc)
         
 out:
     vcpu_schedule_unlock_irq(lock, vc);
+    trace_context_time(vc, NOW() - start);
 }
 
 /*
@@ -2080,7 +2142,7 @@ rt_dom_cntl(
     struct vcpu* scur;
     struct list_head *iter_job;
     int tickle = 0;
-    //s_time_t budget_thr;
+    s_time_t start = NOW();
 
     switch ( op->cmd )
     {
@@ -2448,6 +2510,8 @@ rt_dom_cntl(
         }
         break;
     }
+
+    trace_mc_time(NOW() - start);
     return rc;
 }
 
@@ -2567,6 +2631,7 @@ static void repl_timer_handler(void *data){
     if ( !list_empty(replq) )
         set_timer(repl_timer, replq_elem(replq->next)->cur_deadline);
 //    printk("----\n");
+    trace_repl_time(NOW() - now); 
     spin_unlock_irqrestore(&prv->lock, flag);
 }
 
