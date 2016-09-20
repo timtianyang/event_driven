@@ -887,6 +887,12 @@ xc_sched_rtds_mc_set(
     xen_domctl_schedparam_t* params);
 
 int
+xc_sched_rtds_mc_trigger(
+    xc_interface *xch,
+    uint32_t domid,
+    mode_change_info_t info);
+
+int
 xc_sched_arinc653_schedule_set(
     xc_interface *xch,
     uint32_t cpupool_id,

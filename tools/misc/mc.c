@@ -322,10 +322,10 @@ int main(int argc, char* argv[]){
 
     ezxml_t xml, v, tmp;
     int i = 0;
-    int domid, cpu;
+    int domid, cpu, mode_id;
     const char* s; //tmp string
 
-    if (argc != 2) return fprintf(stderr, "usage: %s xmlfile\n", argv[0]);
+    if (argc != 3) return fprintf(stderr, "usage: %s xmlfile mode_id\n", argv[0]);
 
     xml = ezxml_parse_file(argv[1]);
     if ( xml == NULL )
@@ -346,7 +346,21 @@ int main(int argc, char* argv[]){
     printf("domain=%d\n",domid);
     #endif
     info.domid = domid;
-
+/*
+    s = ezxml_attr(xml,"mode_id");
+    if(s == NULL)
+    {
+        printf("mode_id cannot be NULL\n");
+        return 0;
+    }
+    
+    mode_id = atoi(s);
+    
+    printf("mode_id=%d\n",mode_id);
+*/
+    mode_id = atoi(argv[2]);
+    info.mode_id = mode_id;
+//
     s = ezxml_attr(xml,"cpu");
     if(s == NULL)
     {

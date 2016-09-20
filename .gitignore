@@ -191,6 +191,7 @@ tools/misc/lowmemd
 tools/misc/xencov
 tools/misc/mc
 tools/misc/mc_sys
+tools/misc/mc_trigger
 tools/xentrace/xenalyze
 tools/pygrub/build/*
 tools/python/build/*

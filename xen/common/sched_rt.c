@@ -150,6 +150,8 @@
 #define TRC_RTDS_MC_TIME          TRC_SCHED_CLASS_EVT(RTDS, 15)
 #define TRC_RTDS_REPL_TIME        TRC_SCHED_CLASS_EVT(RTDS, 16)
 
+#define MAX_MODES 10
+
  /*
   * Useful to avoid too many cpumask_var_t on the stack.
   */
@@ -259,14 +261,27 @@ struct rt_dom {
 
 /* mode change related control vars */
 struct mode_change {
-    mode_change_info_t info;  /* mc protocol */
-    unsigned in_trans;          /* if rtds is in transition */
+    mode_change_info_t info;  /* mc modes */
     s_time_t recv;              /* when MCR was received */
     struct list_head backlog_guardq; /* a list of vcpus */
     struct list_head new_vcpus;
     struct list_head unchanged_vcpus;
     struct list_head changed_vcpus;
+    int mode_id; /* should be unique, same id could be over-written */
 } rtds_mc;
+
+/*
+ * for each mode there should be an info struct
+ * and a variable sized chunk of memory. It memory
+ * should be allocated and copied from the user
+ * space
+ */
+struct mc_modes {
+    mode_change_info_t info;
+    xen_domctl_schedparam_t* params;
+};
+
+struct mc_modes sys_modes[MAX_MODES];
 
 struct mc_helper {
     const struct scheduler* ops;
@@ -1265,6 +1280,9 @@ rt_init(struct scheduler *ops)
     prv->repl_timer = NULL;
 
     prv->runq_len = 0;
+
+    memset(&sys_modes, sizeof(struct mc_modes), MAX_MODES);
+
     return 0;
 
  no_mem:
@@ -2136,6 +2154,7 @@ rt_dom_cntl(
     int rc = 0;
     xen_domctl_schedparam_t local_params;
     mode_change_info_t* mc;
+    xen_domctl_schedparam_t* cur_params;
     uint32_t index = 0;
     uint32_t len;
     int cpu = 0;
@@ -2177,15 +2196,22 @@ rt_dom_cntl(
         }
         spin_unlock_irqrestore(&prv->lock, flags);
         break;
-    case XEN_DOMCTL_SCHEDOP_putMC:
+    case XEN_DOMCTL_SCHEDOP_triggerMC:
+        /* need to create a syscall first, pass the same thing
+         in but specify mode_id. check if sys_modes[op->u.mode_change.info] is NULL or not. If not NULL, free is an re-allocate and print warnings. Also move code from putMC to here */
+
         trace_var(TRC_RTDS_MCR, 1, 0,  NULL);
        // printk("rtds mode change info:\n");
         mc = &(op->u.mode_change.info);
-        len = mc->nr_vcpus;
-        cpu = mc->cpu;
-        rtds_mc.info = *mc;
+        
+        if ( mc->mode_id >= MAX_MODES )
+        {
+            rc = -EINVAL;
+            break;
+        }
+
+
         rtds_mc.recv = NOW();
-       // printk("total %d vcpus\n", len);
 
         spin_lock_irqsave(&prv->lock, flags);
         scur = curr_on_cpu(cpu);
@@ -2198,15 +2224,20 @@ rt_dom_cntl(
            // printk("vcpu%d-b=%"PRI_stime" d=%"PRI_stime" ",job->svc->vcpu->vcpu_id, job->cur_budget, job->cur_deadline);
         }
         //printk("\n");
- 
+
+        mc = &sys_modes[mc->mode_id].info;
+        len = mc->nr_vcpus;
+        cpu = mc->cpu;
+
         for ( index = 0; index < len; index++ )
         {
-            if ( copy_from_guest_offset(&local_params, op->u.mode_change.params, index,1) )
+
+            /*if ( copy_from_guest_offset(&local_params, op->u.mode_change.params, index,1) )
             {
-                //printk("copy failed\n");
                 rc = -EFAULT;
                 break;
-            }
+            }*/
+            local_params = sys_modes[mc->mode_id].params[index];
 
             if( local_params.vcpuid >= d->max_vcpus ||
                     d->vcpu[local_params.vcpuid] == NULL ) 
@@ -2508,10 +2539,44 @@ rt_dom_cntl(
                           (unsigned char *)&d);
             }
         }
+        trace_mc_time(NOW() - start);
+        break;
+    case XEN_DOMCTL_SCHEDOP_putMC:
+        trace_var(TRC_RTDS_MCR, 1, 0,  NULL);
+       // printk("rtds mode change info:\n");
+        mc = &(op->u.mode_change.info);
+        len = mc->nr_vcpus;
+
+        if ( mc->mode_id >= MAX_MODES )
+        {
+            printk("mode_id exceeds MAX_MODES\n");
+            rc = -EINVAL;
+            break;
+        }
+
+        cur_params = sys_modes[mc->mode_id].params;
+
+        if ( cur_params )
+        {
+            printk("freeing old mode_id %d\n", mc->mode_id);
+            xfree( cur_params );
+        } 
+        
+
+        cur_params = xzalloc_array(xen_domctl_schedparam_t, len); //now array index pos has a pointer to an array of vcpu modechange params.
+        if ( copy_from_guest_offset(cur_params, op->u.mode_change.params, 0, len) )
+        {
+            rc = -EFAULT;
+            break;
+        }
+
+        sys_modes[mc->mode_id].info = *mc;
+        sys_modes[mc->mode_id].params = cur_params;
+
+        printk("hypervisor recieved mode_id %d of len %d\n", mc->mode_id, len);
+
         break;
     }
-
-    trace_mc_time(NOW() - start);
     return rc;
 }
 

@@ -97,3 +97,24 @@ xc_sched_rtds_mc_set(
     return rc;
 }
 
+int
+xc_sched_rtds_mc_trigger(
+    xc_interface *xch,
+    uint32_t domid,
+    mode_change_info_t info)
+{
+    int rc;
+    //int nr = info.nr_vcpus;
+    DECLARE_DOMCTL;
+
+    domctl.cmd = XEN_DOMCTL_scheduler_op;
+    domctl.domain = (domid_t) domid;
+    domctl.u.scheduler_op.sched_id = XEN_SCHEDULER_RTDS;
+    domctl.u.scheduler_op.cmd = XEN_DOMCTL_SCHEDOP_triggerMC;
+    domctl.u.scheduler_op.u.mode_change.info = info; 
+
+    rc = do_domctl(xch, &domctl);
+
+    return rc;
+}
+
