@@ -150,7 +150,7 @@
 #define TRC_RTDS_MC_TIME          TRC_SCHED_CLASS_EVT(RTDS, 15)
 #define TRC_RTDS_REPL_TIME        TRC_SCHED_CLASS_EVT(RTDS, 16)
 
-#define MAX_MODES 10
+#define MAX_TRANS 10
 
  /*
   * Useful to avoid too many cpumask_var_t on the stack.
@@ -281,7 +281,7 @@ struct mc_modes {
     xen_domctl_schedparam_t* params;
 };
 
-struct mc_modes sys_modes[MAX_MODES];
+struct mc_modes sys_trans[MAX_TRANS];
 
 struct mc_helper {
     const struct scheduler* ops;
@@ -1281,7 +1281,7 @@ rt_init(struct scheduler *ops)
 
     prv->runq_len = 0;
 
-    memset(&sys_modes, sizeof(struct mc_modes), MAX_MODES);
+    memset(&sys_trans, sizeof(struct mc_modes), MAX_TRANS);
 
     return 0;
 
@@ -2198,13 +2198,13 @@ rt_dom_cntl(
         break;
     case XEN_DOMCTL_SCHEDOP_triggerMC:
         /* need to create a syscall first, pass the same thing
-         in but specify mode_id. check if sys_modes[op->u.mode_change.info] is NULL or not. If not NULL, free is an re-allocate and print warnings. Also move code from putMC to here */
+         in but specify mode_id. check if sys_trans[op->u.mode_change.info] is NULL or not. If not NULL, free is an re-allocate and print warnings. Also move code from putMC to here */
 
         trace_var(TRC_RTDS_MCR, 1, 0,  NULL);
        // printk("rtds mode change info:\n");
         mc = &(op->u.mode_change.info);
         
-        if ( mc->mode_id >= MAX_MODES )
+        if ( mc->mode_id >= MAX_TRANS )
         {
             rc = -EINVAL;
             break;
@@ -2225,7 +2225,7 @@ rt_dom_cntl(
         }
         //printk("\n");
 
-        mc = &sys_modes[mc->mode_id].info;
+        mc = &sys_trans[mc->mode_id].info;
         len = mc->nr_vcpus;
         cpu = mc->cpu;
 
@@ -2237,7 +2237,7 @@ rt_dom_cntl(
                 rc = -EFAULT;
                 break;
             }*/
-            local_params = sys_modes[mc->mode_id].params[index];
+            local_params = sys_trans[mc->mode_id].params[index];
 
             if( local_params.vcpuid >= d->max_vcpus ||
                     d->vcpu[local_params.vcpuid] == NULL ) 
@@ -2547,14 +2547,14 @@ rt_dom_cntl(
         mc = &(op->u.mode_change.info);
         len = mc->nr_vcpus;
 
-        if ( mc->mode_id >= MAX_MODES )
+        if ( mc->mode_id >= MAX_TRANS )
         {
-            printk("mode_id exceeds MAX_MODES\n");
+            printk("mode_id exceeds MAX_TRANS\n");
             rc = -EINVAL;
             break;
         }
 
-        cur_params = sys_modes[mc->mode_id].params;
+        cur_params = sys_trans[mc->mode_id].params;
 
         if ( cur_params )
         {
@@ -2570,8 +2570,8 @@ rt_dom_cntl(
             break;
         }
 
-        sys_modes[mc->mode_id].info = *mc;
-        sys_modes[mc->mode_id].params = cur_params;
+        sys_trans[mc->mode_id].info = *mc;
+        sys_trans[mc->mode_id].params = cur_params;
 
         printk("hypervisor recieved mode_id %d of len %d\n", mc->mode_id, len);
 

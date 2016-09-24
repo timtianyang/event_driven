@@ -10,16 +10,16 @@ int main(int argc, char* argv[])
     mode_change_info_t info;
     int domid;
 
-    if ( argc != 3 ) return fprintf(stderr, "usage: %s domid mode_id\n", argv[0]);
+    if ( argc != 3 ) return fprintf(stderr, "usage: %s domid trans_id\n", argv[0]);
 
     mode_id = atoi(argv[2]);
     domid = atoi(argv[1]);
 
     if ( mode_id < 0 )
-        return fprintf(stderr, "mode_id shouldn't be negative\n");
+        return fprintf(stderr, "trans_id shouldn't be negative\n");
 
     info.mode_id = mode_id;
-    printf("mode_id %d is to be triggered\n", mode_id);
+    printf("trans_id %d will be triggered\n", mode_id);
 
     xci = xc_interface_open(0, 0, 0);
 
