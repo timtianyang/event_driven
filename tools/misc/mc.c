@@ -401,6 +401,9 @@ int main(int argc, char* argv[]){
         printf("%s\n",s);
         #endif
 
+        /* used in passing info to matlab */
+        printf("%d %s\n",cur->vcpuid, s);
+
         if( strcmp(s,"new") == 0 )
             cur->type = NEW;
         else if( strcmp(s,"old") == 0 )

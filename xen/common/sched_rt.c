@@ -1538,7 +1538,7 @@ rt_vcpu_insert(const struct scheduler *ops, struct vcpu *vc)
         for_each_vcpu ( sdom->dom, v )
         {
             svc = rt_vcpu(v);
-            svc->budget = RTDS_DEFAULT_PERIOD/prv->nr_vcpus;
+            svc->budget = RTDS_DEFAULT_PERIOD/prv->nr_vcpus - MICROSECS(20);
 //            printk("vcpu%d budget is now %"PRI_stime"\n", v->vcpu_id,svc->budget);
         }
     }
@@ -2542,7 +2542,7 @@ rt_dom_cntl(
         trace_mc_time(NOW() - start);
         break;
     case XEN_DOMCTL_SCHEDOP_putMC:
-        trace_var(TRC_RTDS_MCR, 1, 0,  NULL);
+        //trace_var(TRC_RTDS_MCR, 1, 0,  NULL);
        // printk("rtds mode change info:\n");
         mc = &(op->u.mode_change.info);
         len = mc->nr_vcpus;
