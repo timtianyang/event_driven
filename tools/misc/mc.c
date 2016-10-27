@@ -346,21 +346,10 @@ int main(int argc, char* argv[]){
     printf("domain=%d\n",domid);
     #endif
     info.domid = domid;
-/*
-    s = ezxml_attr(xml,"mode_id");
-    if(s == NULL)
-    {
-        printf("mode_id cannot be NULL\n");
-        return 0;
-    }
-    
-    mode_id = atoi(s);
-    
-    printf("mode_id=%d\n",mode_id);
-*/
+
     mode_id = atoi(argv[2]);
     info.mode_id = mode_id;
-//
+
     s = ezxml_attr(xml,"cpu");
     if(s == NULL)
     {
