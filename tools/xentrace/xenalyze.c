@@ -7714,11 +7714,13 @@ void sched_process(struct pcpu_info *p)
                 struct {
                     unsigned int vcpuid:16, domid:16;
                     unsigned int time_lo, time_hi;
+                    unsigned int c_lo, c_hi;
                 } *r = (typeof(r))ri->d;
                 uint64_t time = (((uint64_t)r->time_hi) << 32) + r->time_lo;
+                uint64_t c = (((uint64_t)r->c_hi) << 32) + r->c_lo;
 
-                printf(" %s rtds:context_time d%uv%u, time = %"PRIu64"\n", ri->dump_header,
-                       r->domid, r->vcpuid, time);
+                printf(" %s rtds:context_time d%uv%u, time = %"PRIu64", c = %"PRIu64"\n", ri->dump_header,
+                       r->domid, r->vcpuid, time, c);
             }
             break;
         case TRC_SCHED_CLASS_EVT(RTDS, 15): /* MC_TIME     */
@@ -7743,6 +7745,18 @@ void sched_process(struct pcpu_info *p)
                 printf(" %s rtds:repl_time time = %"PRIu64"\n", ri->dump_header, time);
             }
             break;
+        case TRC_SCHED_CLASS_EVT(RTDS, 17): /* UNRUNNABLE     */
+            if(opt.dump_all)
+            {
+                struct {
+                    unsigned int time_lo, time_hi;
+                } *r = (typeof(r))ri->d;
+                uint64_t time = (((uint64_t)r->time_hi) << 32) + r->time_lo;
+
+                printf(" %s rtds:unrunnable = %"PRIu64"\n", ri->dump_header, time);
+            }
+            break;
+
         default:
             process_generic(&p->ri);
         }

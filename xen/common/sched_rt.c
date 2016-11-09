@@ -150,6 +150,8 @@
 #define TRC_RTDS_MC_TIME          TRC_SCHED_CLASS_EVT(RTDS, 15)
 #define TRC_RTDS_REPL_TIME        TRC_SCHED_CLASS_EVT(RTDS, 16)
 
+#define TRC_RTDS_UNRUNNABLE        TRC_SCHED_CLASS_EVT(RTDS, 17)
+
 #define MAX_TRANS 10
 
  /*
@@ -303,16 +305,16 @@ static inline void trace_sched_time(struct vcpu *svc, s_time_t time)
                   (unsigned char *) &d);
 }
 
-static inline void trace_context_time(struct vcpu *svc, s_time_t time)
+static inline void trace_context_time(struct vcpu *svc, s_time_t time, uint64_t c)
 {
     struct __packed {
             unsigned vcpu:16, dom:16;
-            uint64_t time;
+            uint64_t time, c;
         } d;
         d.dom = svc->domain->domain_id;
         d.vcpu = svc->vcpu_id;
         d.time = (uint64_t) time;
-
+        d.c = c;
         trace_var(TRC_RTDS_CONTEXT_TIME, 1,
                   sizeof(d),
                   (unsigned char *) &d);
@@ -326,6 +328,18 @@ static inline void trace_mc_time(s_time_t time)
         d.time = (uint64_t) time;
 
         trace_var(TRC_RTDS_MC_TIME, 1,
+                  sizeof(d),
+                  (unsigned char *) &d);
+}
+
+static inline void trace_unrunnable_time(s_time_t time)
+{
+    struct __packed {
+            uint64_t time;
+        } d;
+        d.time = (uint64_t) time;
+
+        trace_var(TRC_RTDS_UNRUNNABLE, 1,
                   sizeof(d),
                   (unsigned char *) &d);
 }
@@ -2100,6 +2114,7 @@ rt_context_saved(const struct scheduler *ops, struct vcpu *vc)
 {
     struct rt_vcpu *svc = rt_vcpu(vc);
     spinlock_t *lock = vcpu_schedule_lock_irq(vc);
+    uint64_t c = 0;
 
     s_time_t start = NOW();
 
@@ -2115,6 +2130,7 @@ rt_context_saved(const struct scheduler *ops, struct vcpu *vc)
     }
     else if ( !svc->active )
     {
+        c = 1;
         //printk("vcpu %d context_saved not active\n",vc->vcpu_id);
         /* stop releasing new jobs of this vcpu but preserve the released jobs */
         //replq_remove(ops, svc);
@@ -2122,6 +2138,8 @@ rt_context_saved(const struct scheduler *ops, struct vcpu *vc)
     }
     else
     {
+        c = 2;
+        trace_unrunnable_time(start);
 //        printk("context_saved,vcpu%d not runnable\n",svc->vcpu->vcpu_id);
         replq_remove(ops, svc);
 //        printk("removing %d jobs\n",svc->num_jobs);
@@ -2130,12 +2148,14 @@ rt_context_saved(const struct scheduler *ops, struct vcpu *vc)
     }
 
     svc->running_job = NULL;
-    if ( scan_backlog_new_list(ops) )
+    if ( scan_backlog_new_list(ops) ){
         cpu_raise_softirq(vc->processor, SCHEDULE_SOFTIRQ);
-        
+        c |= 4;
+    }
 out:
+    trace_context_time(vc, NOW() - start, c);
     vcpu_schedule_unlock_irq(lock, vc);
-    trace_context_time(vc, NOW() - start);
+    
 }
 
 /*
@@ -2161,7 +2181,7 @@ rt_dom_cntl(
     struct vcpu* scur;
     struct list_head *iter_job;
     int tickle = 0;
-    s_time_t start = NOW();
+    s_time_t start;
 
     switch ( op->cmd )
     {
@@ -2211,9 +2231,11 @@ rt_dom_cntl(
         }
 
 
-        rtds_mc.recv = NOW();
+        
 
         spin_lock_irqsave(&prv->lock, flags);
+        rtds_mc.recv = NOW();
+        start = rtds_mc.recv;
         scur = curr_on_cpu(cpu);
        
        // printk("vcpu%d is running\n", scur->vcpu_id);
@@ -2522,6 +2544,8 @@ rt_dom_cntl(
             }
             //printk("---------\n");
         }
+
+        trace_mc_time(NOW() - start);
         spin_unlock_irqrestore(&prv->lock, flags);
         
         //printk("mc recv %"PRI_stime"\n", rtds_mc.recv);
@@ -2539,7 +2563,7 @@ rt_dom_cntl(
                           (unsigned char *)&d);
             }
         }
-        trace_mc_time(NOW() - start);
+        
         break;
     case XEN_DOMCTL_SCHEDOP_putMC:
         //trace_var(TRC_RTDS_MCR, 1, 0,  NULL);
@@ -2585,7 +2609,7 @@ rt_dom_cntl(
  * from the replq and does the actual replenishment.
  */
 static void repl_timer_handler(void *data){
-    s_time_t now = NOW();
+    s_time_t now;
     struct scheduler *ops = data;
     struct rt_private *prv = rt_priv(ops);
     struct list_head *replq = rt_replq(ops);
@@ -2601,6 +2625,7 @@ static void repl_timer_handler(void *data){
     int tickle = 0;
 
     spin_lock_irqsave(&prv->lock, flag);
+    now = NOW();
 
     /* timer has been initialized on the right cpu already */
     scur = current;

@@ -49,10 +49,10 @@
 0x0002280b  CPU%(cpu)d  %(tsc)d (+ )  rtds:update_changed     [ dom:vcpu = 0x%(1)08x ]
 0x0002280c  CPU%(cpu)d  %(tsc)d (+ )  rtds:backlog_satisfied     [ dom:vcpu = 0x%(1)08x runq_len= %(2)d thr= %(3)d oldnew= %(4)d copm= %(5)d ]
 0x0002280d  CPU%(cpu)d  %(tsc)d (+ )  rtds:sched_time     [ dom:vcpu = 0x%(1)08x, time = 0x%(3)08x%(2)08x ]
-0x0002280e  CPU%(cpu)d  %(tsc)d (+ )  rtds:context_time     [ dom:vcpu = 0x%(1)08x, time = 0x%(3)08x%(2)08x ]
+0x0002280e  CPU%(cpu)d  %(tsc)d (+ )  rtds:context_time     [ dom:vcpu = 0x%(1)08x, time = 0x%(3)08x%(2)08x , case = 0x%(5)08x%(4)08x ]
 0x0002280f  CPU%(cpu)d  %(tsc)d (+ )  rtds:mc_time     [ time = 0x%(2)08x%(1)08x ]
 0x00022810  CPU%(cpu)d  %(tsc)d (+ )  rtds:repl_time     [ time = 0x%(2)08x%(1)08x ]
-
+0x00022811  CPU%(cpu)d  %(tsc)d (+ )  rtds:unrunnable     [ time = 0x%(2)08x%(1)08x ]
 
 0x00081001  CPU%(cpu)d  %(tsc)d (+%(reltsc)8d)  VMENTRY
 0x00081002  CPU%(cpu)d  %(tsc)d (+%(reltsc)8d)  VMEXIT      [ exitcode = 0x%(1)08x, rIP  = 0x%(2)08x ]
