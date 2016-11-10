@@ -27,6 +27,7 @@ INSTALL_SBIN-$(CONFIG_X86)     += xen-mfndump
 INSTALL_SBIN-$(CONFIG_X86)     += mc
 INSTALL_SBIN-$(CONFIG_X86)     += mc_sys
 INSTALL_SBIN-$(CONFIG_X86)     += mc_trigger
+INSTALL_SBIN-$(CONFIG_X86)     += mc_gen
 INSTALL_SBIN                   += xen-ringwatch
 INSTALL_SBIN                   += xen-tmem-list-parse
 INSTALL_SBIN                   += xencov
@@ -110,6 +111,12 @@ mc_sys: mc_sys.o
 mc_trigger.o: CFLAGS += -I$(XEN_ROOT)/tools/libxc $(CFLAGS_libxencall)
 mc_trigger: mc_trigger.o
 	$(CC) $(LDFLAGS) -o $@ $< $(LDLIBS_libxenevtchn) $(LDLIBS_libxenctrl) $(LDLIBS_libxenguest) $(APPEND_LDFLAGS)
+
+mc_gen.o: CFLAGS += -I$(XEN_ROOT)/tools/libxc $(CFLAGS_libxencall)
+mc_gen: mc_gen.o
+	$(CC) $(LDFLAGS) -o $@ $< $(LDLIBS_libxenevtchn) $(LDLIBS_libxenctrl) $(LDLIBS_libxenguest) $(APPEND_LDFLAGS)
+
+
 
 xenwatchdogd: xenwatchdogd.o
 	$(CC) $(LDFLAGS) -o $@ $< $(LDLIBS_libxenctrl) $(APPEND_LDFLAGS)

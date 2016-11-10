@@ -62,7 +62,7 @@ struct vcpu* get_vcpus_from_transition(ezxml_t root, int src, int dst, int* num)
     ezxml_t src_mode = NULL, dst_mode = NULL, temp, v;
     struct vcpu *src_v, *dst_v, *ret_v;
     /* find the src mode and dst mode first */
-    printf("src = mode%d dst = mode%d\n",src, dst);
+    //printf("src = mode%d dst = mode%d\n",src, dst);
     for( temp = ezxml_child(root, "mode"); temp; temp = temp->next )
     {
         if ( atoi(get_attr(temp, "id")) == src )
@@ -107,13 +107,14 @@ struct vcpu* get_vcpus_from_transition(ezxml_t root, int src, int dst, int* num)
             }
         }
     }
+    /*
     printf("sorted src mode vcpus:\n");
     for ( i = 0; i < num_v_src; i++)
     {
         printf("vcpu%d ",src_v[i].id);
     }
     printf("\n");
-
+    */
 /***************************************************/
     /* construct dst mode vcpu list */
     for( v = ezxml_child(dst_mode, "vcpu"); v; v = v->next )
@@ -149,13 +150,14 @@ struct vcpu* get_vcpus_from_transition(ezxml_t root, int src, int dst, int* num)
             }
         }
     }
+    /*
     printf("sorted dst mode vcpus:\n");
     for ( i = 0; i < num_v_dst; i++)
     {
         printf("vcpu%d ",dst_v[i].id);
     }
     printf("\n");
-
+    */
 //get he size of total interesting vcpus
     for ( i = 0; i < num_v_src; i++ )
     {
@@ -204,7 +206,12 @@ struct vcpu* get_vcpus_from_transition(ezxml_t root, int src, int dst, int* num)
                      src_v[i].budget == dst_v[j].budget )
                     ret_v[pos++].type = UNCHANGED;
                 else
+                {
+                    ret_v[pos].period = dst_v[j].period;
+                    ret_v[pos].budget = dst_v[j].budget;
                     ret_v[pos++].type = CHANGED;
+                    
+                }
                 break;
             }
         }
@@ -232,7 +239,7 @@ struct vcpu* get_vcpus_from_transition(ezxml_t root, int src, int dst, int* num)
         }
     }
     //printf("total = %d\n",num_v_total);
-    for ( i = 0; i < num_v_total; i++ )
+    /*for ( i = 0; i < num_v_total; i++ )
     {
         printf("vcpu%d is ", ret_v[i].id);
         switch ( ret_v[i].type)
@@ -252,6 +259,7 @@ struct vcpu* get_vcpus_from_transition(ezxml_t root, int src, int dst, int* num)
         }
         
     }
+    */
     *num = num_v_total;
     return ret_v;
 }
@@ -284,7 +292,7 @@ void extract_type_transition_text(const char* path, char** unchanged,
         if (strcmp(line, "<rules>") == 0)
         {
             rules_found = 1;
-            printf("found rules\n");
+            //printf("found rules\n");
             break;
         }
     }
@@ -344,10 +352,10 @@ void extract_type_transition_text(const char* path, char** unchanged,
     *unchanged = types[1];
     *new = types[2];
     *old = types[3];
-    printf("extracted changed:\n%s", *changed);
+    /*printf("extracted changed:\n%s", *changed);
     printf("extracted unchanged:\n%s", *unchanged);
     printf("extracted new:\n%s", *new);
-    printf("extracted old:\n%s", *old);
+    printf("extracted old:\n%s", *old);*/
     fclose(fp);
 }
 
@@ -396,9 +404,9 @@ int main(int argc, char* argv[]){
     }
 
     cpu = atoi(get_attr(xml, "cpu"));
-    printf("rtds is on cpu %d\n", cpu);
+    //printf("rtds is on cpu %d\n", cpu);
     domain = atoi(get_attr(xml, "domain"));
-    printf("rtds is domain %d\n", domain);
+    //printf("rtds is domain %d\n", domain);
 
     /* get number of modes and transitions*/
     for ( mode_tag = ezxml_child(xml, "mode"); mode_tag; mode_tag = mode_tag->next )
@@ -407,7 +415,7 @@ int main(int argc, char* argv[]){
     if ( num_of_modes == 0 )
         return fprintf(stderr, "system xml file cannot have 0 number of modes\n");
 
-    printf("mc_sys: there are %d modes in this sys.\n", num_of_modes);
+    //printf("mc_sys: there are %d modes in this sys.\n", num_of_modes);
 
     for ( trans_tag = ezxml_child(xml, "trans"); trans_tag; trans_tag = trans_tag->next )
         num_of_trans++;
@@ -415,7 +423,7 @@ int main(int argc, char* argv[]){
     if ( num_of_trans == 0 )
         return fprintf(stderr, "system xml file cannot have 0 number of transitions\n");
 
-    printf("mc_sys: there are %d transitions in this sys.\n", num_of_trans);
+    //printf("mc_sys: there are %d transitions in this sys.\n", num_of_trans);
 
     /* iterate through all transitions, write one xml per transition */
     for ( trans_tag = ezxml_child(xml, "trans"); trans_tag; trans_tag = trans_tag->next )
@@ -446,7 +454,7 @@ int main(int argc, char* argv[]){
         /* writing all vcpus for a transition */
         src = atoi(get_attr(trans_tag, "src"));
         dst = atoi(get_attr(trans_tag, "dst"));
-        printf("parsing transition from %d to %d\n", src, dst);
+        //printf("parsing transition from %d to %d\n", src, dst);
         vcpus = get_vcpus_from_transition(xml, src, dst, &num_v);
         for ( i = 0; i< num_v; i++ )
         {
