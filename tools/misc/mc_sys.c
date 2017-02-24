@@ -377,8 +377,9 @@ char* get_vcpu_type(int type)
 }
 
 /*
- * arg1: sys_xml
- * arg2: output path, created xmls will be appended with numbers
+ * arg1: rule_xml
+ * arg2; sys_xml
+ * arg3: output path, created xmls will be appended with numbers
  */
 int main(int argc, char* argv[]){
     ezxml_t xml, trans_tag,  mode_tag;
