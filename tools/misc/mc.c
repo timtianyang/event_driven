@@ -333,13 +333,6 @@ int main(int argc, char* argv[]){
         printf("Failed to open the sys file\n");
         error();
     }
-
-    s = ezxml_attr(xml,"domain");
-    if(s == NULL)
-    {
-        printf("Domain id cannot be NULL\n");
-        return 0;
-    }
     
     domid = atoi(argv[3]);
     #ifdef MC_DEBUG
