@@ -294,7 +294,7 @@ static inline void trace_sched_time(struct vcpu *svc, s_time_t time)
             uint64_t time;
         } d;
         d.dom = svc->domain->domain_id;
-        d.vcpu = svc->vcpu_id;
+        d.vcpu = d.vcpu = is_idle_vcpu(svc) ? 64 : svc->vcpu_id;
         d.time = (uint64_t) time;
 
         trace_var(TRC_RTDS_SCHED_TIME, 1,
@@ -309,7 +309,7 @@ static inline void trace_context_time(struct vcpu *svc, s_time_t time, uint64_t 
             uint64_t time, c;
         } d;
         d.dom = svc->domain->domain_id;
-        d.vcpu = svc->vcpu_id;
+        d.vcpu = is_idle_vcpu(svc) ? 64 : svc->vcpu_id;
         d.time = (uint64_t) time;
         d.c = c;
         trace_var(TRC_RTDS_CONTEXT_TIME, 1,
