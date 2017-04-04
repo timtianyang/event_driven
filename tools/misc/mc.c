@@ -325,7 +325,7 @@ int main(int argc, char* argv[]){
     int domid, cpu, mode_id;
     const char* s; //tmp string
 
-    if (argc != 3) return fprintf(stderr, "usage: %s xmlfile mode_id\n", argv[0]);
+    if (argc != 4) return fprintf(stderr, "usage: %s xmlfile mode_id dom_id\n", argv[0]);
 
     xml = ezxml_parse_file(argv[1]);
     if ( xml == NULL )
@@ -341,7 +341,7 @@ int main(int argc, char* argv[]){
         return 0;
     }
     
-    domid = atoi(s);
+    domid = atoi(argv[3]);
     #ifdef MC_DEBUG
     printf("domain=%d\n",domid);
     #endif

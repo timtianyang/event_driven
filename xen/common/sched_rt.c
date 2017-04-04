@@ -87,8 +87,8 @@
  * Default parameters:
  * Period and budget in default is 10 and 4 ms, respectively
  */
-#define RTDS_DEFAULT_PERIOD     (MICROSECS(10000))
-#define RTDS_DEFAULT_BUDGET     (MICROSECS(2480))
+#define RTDS_DEFAULT_PERIOD     (MICROSECS(50000))
+#define RTDS_DEFAULT_BUDGET     (MICROSECS(1500))
 
 #define UPDATE_LIMIT_SHIFT      10
 
@@ -266,9 +266,6 @@ struct mode_change {
     mode_change_info_t info;  /* mc modes */
     s_time_t recv;              /* when MCR was received */
     struct list_head backlog_guardq; /* a list of vcpus */
-    struct list_head new_vcpus;
-    struct list_head unchanged_vcpus;
-    struct list_head changed_vcpus;
     int mode_id; /* should be unique, same id could be over-written */
 } rtds_mc;
 
@@ -1276,11 +1273,6 @@ rt_init(struct scheduler *ops)
     INIT_LIST_HEAD(&prv->depletedq);
     INIT_LIST_HEAD(&prv->replq);
 
-    /* mode change */
-    INIT_LIST_HEAD(&rtds_mc.backlog_guardq);
-    INIT_LIST_HEAD(&rtds_mc.new_vcpus);
-    INIT_LIST_HEAD(&rtds_mc.unchanged_vcpus);
-    INIT_LIST_HEAD(&rtds_mc.changed_vcpus);
     //prv->runq_len = 0;
     cpumask_clear(&prv->tickled);
 
@@ -1295,7 +1287,10 @@ rt_init(struct scheduler *ops)
 
     prv->runq_len = 0;
 
-    memset(&sys_trans, sizeof(struct mc_modes), MAX_TRANS);
+    /* mode change */
+    INIT_LIST_HEAD(&rtds_mc.backlog_guardq);
+
+    memset(&sys_trans, 0, (sizeof(struct mc_modes)) * MAX_TRANS);
 
     return 0;
 
@@ -1433,6 +1428,22 @@ rt_dom_init(const struct scheduler *ops, struct domain *dom)
 static void
 rt_dom_destroy(const struct scheduler *ops, struct domain *dom)
 {
+    int i;
+    xen_domctl_schedparam_t* cur_params;
+
+    for ( i = 0; i < MAX_TRANS; i++ )
+    {
+        cur_params = sys_trans[i].params;
+        if ( cur_params )
+        {
+            printk("freeing old mode_id %d\n", i);
+            xfree( cur_params );
+        }
+    }
+
+    /* bug is a vcpu is still waiting */
+    BUG_ON(!list_empty(&rtds_mc.backlog_guardq));
+
     rt_free_domdata(ops, rt_dom(dom));
 }
 
@@ -1493,11 +1504,22 @@ static void
 rt_free_vdata(const struct scheduler *ops, void *priv)
 {
     struct rt_vcpu *svc = priv;
+    struct list_head *iter, *tmp;
 
     kill_timer(svc->mc_ng_timer);
     xfree(svc->mc_ng_timer);
     kill_timer(svc->mc_og_timer);
     xfree(svc->mc_og_timer);
+
+    list_for_each_safe ( iter, tmp, &svc->jobq )
+    {
+        struct rt_job* job = jobq_elem(iter);
+
+        list_del(&job->jobq_elem);  
+        if ( job->on_runq )     
+            list_del(&job->q_elem);
+        xfree(job);
+    }
 
     xfree(svc);
 }
@@ -1553,7 +1575,7 @@ rt_vcpu_insert(const struct scheduler *ops, struct vcpu *vc)
         {
             svc = rt_vcpu(v);
             svc->budget = RTDS_DEFAULT_PERIOD/prv->nr_vcpus - MICROSECS(20);
-//            printk("vcpu%d budget is now %"PRI_stime"\n", v->vcpu_id,svc->budget);
+            printk("RTDS: vcpu%d budget is now %"PRI_stime"\n", v->vcpu_id,svc->budget);
         }
     }
     vcpu_schedule_unlock_irq(lock, vc);
@@ -2234,10 +2256,7 @@ rt_dom_cntl(
         
 
         spin_lock_irqsave(&prv->lock, flags);
-        rtds_mc.recv = NOW();
-        start = rtds_mc.recv;
-        scur = curr_on_cpu(cpu);
-       
+               
        // printk("vcpu%d is running\n", scur->vcpu_id);
         list_for_each( iter_job, rt_runq(ops) )
         {
@@ -2246,6 +2265,10 @@ rt_dom_cntl(
            // printk("vcpu%d-b=%"PRI_stime" d=%"PRI_stime" ",job->svc->vcpu->vcpu_id, job->cur_budget, job->cur_deadline);
         }
         //printk("\n");
+
+        rtds_mc.recv = NOW();
+        start = rtds_mc.recv;
+        scur = curr_on_cpu(cpu);
 
         mc = &sys_trans[mc->mode_id].info;
         len = mc->nr_vcpus;
@@ -2598,7 +2621,11 @@ rt_dom_cntl(
         sys_trans[mc->mode_id].params = cur_params;
 
         printk("hypervisor recieved mode_id %d of len %d\n", mc->mode_id, len);
-
+        for ( index = 0; index < len; index++ )
+        {
+            local_params = sys_trans[mc->mode_id].params[index];
+            printk("vcpu%d type%d\n",local_params.vcpuid,local_params.type);
+        }
         break;
     }
     return rc;
