@@ -242,7 +242,6 @@ struct rt_vcpu {
     unsigned crit;              /* criticality, used in releasing new */
 
     const struct scheduler *ops; /* used in timer handler */
-    struct list_head type_elem; /* on the type list */
     struct list_head guard_elem; /* on a list of guards */
 
     struct timer *mc_og_timer; /* timer to handle action */ 
@@ -294,7 +293,7 @@ static inline void trace_sched_time(struct vcpu *svc, s_time_t time)
             uint64_t time;
         } d;
         d.dom = svc->domain->domain_id;
-        d.vcpu = d.vcpu = is_idle_vcpu(svc) ? 64 : svc->vcpu_id;
+        d.vcpu = is_idle_vcpu(svc) ? 64 : svc->vcpu_id;
         d.time = (uint64_t) time;
 
         trace_var(TRC_RTDS_SCHED_TIME, 1,
@@ -790,6 +789,23 @@ job_vcpu_insert(struct rt_vcpu* svc, struct rt_job* job)
 }
 
 /*
+ * insert vcpus to backlog queue based on threshold.
+ */
+static inline void
+backlog_queue_insert(struct rt_vcpu* svc)
+{
+    struct list_head *iter;
+
+    list_for_each ( iter, &rtds_mc.backlog_guardq )
+    {
+        struct rt_vcpu* v = guard_elem(iter);
+        if ( v->mc_param.guard_new.buf_comp.len >= svc->mc_param.guard_new.buf_comp.len )
+            break;
+    }
+    list_add_tail(&svc->guard_elem, &rtds_mc.backlog_guardq);
+}
+
+/*
  * recyle a job on a vcpu and runq
  */
 static inline void
@@ -1080,15 +1096,12 @@ replq_reinsert(const struct scheduler *ops, struct rt_vcpu *svc)
  * return 1 if something has been disabled/emabled
  */
 static inline int
-check_backlog_guard(const struct scheduler* ops, struct rt_vcpu *svc, int old_new, int disable_running)
+check_backlog_guard(const struct scheduler* ops, struct rt_vcpu *svc, int old_new, int disable_running, int cur_len)
 {
 #define MC_NOT_DISABLE_RUNNING 0
 #define MC_DISABLE_RUNNING 1
 #define MC_BKL_OLD 0
 #define MC_BKL_NEW 1
-//    struct list_head *iter, *tmp;
-    struct rt_private *prv = rt_priv(ops);
-    //struct list_head *depletedq = rt_depletedq(ops);
 
     int thr = old_new == 1? svc->mc_param.guard_new.buf_comp.len:
                             svc->mc_param.guard_old.buf_comp.len;
@@ -1101,11 +1114,11 @@ check_backlog_guard(const struct scheduler* ops, struct rt_vcpu *svc, int old_ne
     switch (comp)
     {
     case MC_LARGER_THAN:
-        if ( prv->runq_len + vcpu_running >= thr )
+        if ( cur_len + vcpu_running >= thr )
             satisfied = 1;
         break;
     case MC_SMALLER_THAN:
-        if ( prv->runq_len + vcpu_running <= thr )
+        if ( cur_len + vcpu_running <= thr )
             satisfied = 1;
         break;
     }
@@ -1126,7 +1139,7 @@ check_backlog_guard(const struct scheduler* ops, struct rt_vcpu *svc, int old_ne
 */
         if ( !old_new ) // 1 is new, 0 is old
         {
-            trace_backlog_satisfied(svc, 0, prv->runq_len, thr, comp);
+            trace_backlog_satisfied(svc, 0, cur_len, thr, comp);
             //printk("old backlog guard disabling..\n");
             svc->active = 0;
 
@@ -1147,7 +1160,7 @@ check_backlog_guard(const struct scheduler* ops, struct rt_vcpu *svc, int old_ne
             s_time_t now = NOW();
             //printk("new backlog guard enabling..\n");
 
-            trace_backlog_satisfied(svc, 1, prv->runq_len, thr, comp);
+            trace_backlog_satisfied(svc, 1, cur_len, thr, comp);
             trace_enable_vcpu(svc);
 
             if ( svc->type == CHANGED )
@@ -1181,11 +1194,13 @@ scan_backlog_new_list(const struct scheduler* ops)
     int tickle = 0;
     struct list_head *iter, *tmp;
     struct rt_vcpu* svc;
+    struct rt_private *prv = rt_priv(ops);
+    int cur_len = prv->runq_len;
 
     list_for_each_safe ( iter, tmp, &rtds_mc.backlog_guardq )
     {
         svc = guard_elem(iter);
-        if ( check_backlog_guard(ops, svc, MC_BKL_NEW, MC_NOT_DISABLE_RUNNING) )
+        if ( check_backlog_guard(ops, svc, MC_BKL_NEW, MC_NOT_DISABLE_RUNNING, cur_len) )
         {
             tickle = 1;
             list_del_init(&svc->guard_elem);
@@ -1548,8 +1563,6 @@ rt_vcpu_insert(const struct scheduler *ops, struct vcpu *vc)
     
     if ( now >= svc->cur_deadline )
         rt_update_deadline(now, svc);
-
-//    if ( !__vcpu_on_q(svc) && vcpu_runnable(vc) )
     
     prv->nr_vcpus++;
     if ( vcpu_runnable(vc) )
@@ -1563,6 +1576,8 @@ rt_vcpu_insert(const struct scheduler *ops, struct vcpu *vc)
 
         }
     }
+
+    INIT_LIST_HEAD(&svc->guard_elem);
 
     list_for_each( iter, &prv->sdom )
     {
@@ -1683,12 +1698,16 @@ burn_budget(const struct scheduler *ops, struct rt_vcpu *svc, s_time_t now)
             unsigned cur_budget_lo;
             unsigned cur_budget_hi;
             int delta;
+            int miss;
         } d;
         d.dom = svc->vcpu->domain->domain_id;
         d.vcpu = svc->vcpu->vcpu_id;
         d.cur_budget_lo = (unsigned) job->cur_budget;
         d.cur_budget_hi = (unsigned) (job->cur_budget >> 32);
         d.delta = delta;
+        d.miss = 0;
+        if ( unlikely( now > job->cur_deadline ) )
+            d.miss = 1;
         trace_var(TRC_RTDS_BUDGET_BURN, 1,
                   sizeof(d),
                   (unsigned char *) &d);
@@ -1845,15 +1864,15 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
     ret.task = snext->vcpu;
 
         /* TRACE */
-    {
-        
+    {   
             struct {
                 unsigned vcpu:16, dom:16;
                 unsigned cur_deadline_lo, cur_deadline_hi;
                 unsigned cur_budget_lo, cur_budget_hi;
                 unsigned mode;
             } d;
-            
+     trace_sched_time(snext->vcpu, NOW() - now);
+       
         if( !is_idle_vcpu(snext->vcpu) )
         {
             struct rt_vcpu* svc = picked_job->svc;
@@ -1880,7 +1899,6 @@ rt_schedule(const struct scheduler *ops, s_time_t now, bool_t tasklet_work_sched
                       sizeof(d),
                       (unsigned char *) &d);
         }
-        trace_sched_time(snext->vcpu, NOW() - now);
     }
 
     return ret;
@@ -2204,6 +2222,7 @@ rt_dom_cntl(
     struct list_head *iter_job;
     int tickle = 0;
     s_time_t start;
+    int backlog_len;
 
     switch ( op->cmd )
     {
@@ -2268,11 +2287,13 @@ rt_dom_cntl(
 
         rtds_mc.recv = NOW();
         start = rtds_mc.recv;
-        scur = curr_on_cpu(cpu);
-
+        
         mc = &sys_trans[mc->mode_id].info;
         len = mc->nr_vcpus;
         cpu = mc->cpu;
+        scur = curr_on_cpu(cpu);
+
+        backlog_len = prv->runq_len;
 
         for ( index = 0; index < len; index++ )
         {
@@ -2351,8 +2372,12 @@ rt_dom_cntl(
                     trace_disable_running_job(svc->running_job);
                     svc->running_job->cur_budget = 0; // kill budget
                     tickle = 1;
-                    //printk("***aborting vcpu%d's running job***\n", svc->vcpu->vcpu_id);
+               //     printk("***aborting vcpu%d's running job***\n", svc->vcpu->vcpu_id);
                 }
+               // else if (svc->mc_param.action_running_old == MC_ABORT) 
+               // {
+               //     printk("curr vcpu %d vcpu%d not running\n",scur->vcpu_id,svc->vcpu->vcpu_id);
+               // }
                 //else
                     //printk("it's not running\n");
 
@@ -2366,16 +2391,16 @@ rt_dom_cntl(
                         //printk("old guards:\n");
                         switch ( svc->mc_param.guard_old_type )
                         {
+                            /*
                             case MC_TIME_FROM_MCR:
-                                //printk("time guard\n");
                                 set_timer(svc->mc_og_timer, svc->mc_param.guard_old.t_from_MCR + rtds_mc.recv);
                                 break;
+                            */
                             case MC_BUDGET:
-                                //printk("budget comp\n");
                                 check_budget_guard(ops, svc);                                
                                 break;
                             case MC_BACKLOG:
-                                check_backlog_guard(ops, svc, MC_BKL_OLD, MC_NOT_DISABLE_RUNNING);
+                                check_backlog_guard(ops, svc, MC_BKL_OLD, MC_NOT_DISABLE_RUNNING, backlog_len);
 /*
                                 if ( !check_backlog_guard(ops, svc, MC_BKL_OLD, MC_NOT_DISABLE_RUNNING) )
                                     printk("backlog check failed. not disable jobs on queue\n");
@@ -2554,9 +2579,10 @@ rt_dom_cntl(
                         }
                         break;
                     case MC_BACKLOG:
-                        if ( !check_backlog_guard(ops, svc, MC_BKL_NEW, MC_NOT_DISABLE_RUNNING) )
+                        if ( !check_backlog_guard(ops, svc, MC_BKL_NEW, MC_NOT_DISABLE_RUNNING, backlog_len) )
                         {
-                            list_add_tail(&svc->guard_elem, &rtds_mc.backlog_guardq);
+                            backlog_queue_insert(svc);
+                            //list_add_tail(&svc->guard_elem, &rtds_mc.backlog_guardq);
                             //printk("backlog new guard failed. add to queue\n");
                         }
                         else
@@ -2625,6 +2651,8 @@ rt_dom_cntl(
         {
             local_params = sys_trans[mc->mode_id].params[index];
             printk("vcpu%d type%d\n",local_params.vcpuid,local_params.type);
+            if ( local_params.type == OLD )
+                printk("vcpu%d old running action %d\n",local_params.vcpuid,local_params.action_running_old);
         }
         break;
     }

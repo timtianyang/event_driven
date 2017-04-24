@@ -38,7 +38,7 @@
 
 0x00022801  CPU%(cpu)d  %(tsc)d (+%(reltsc)8d)  rtds:tickle        [ cpu = %(1)d ]
 0x00022802  CPU%(cpu)d  %(tsc)d (+ )  rtds:schedule     [ dom:vcpu = 0x%(1)08x, cur_deadline = 0x%(3)08x%(2)08x, cur_budget = 0x%(5)08x%(4)08x, mode = %(6)d ]
-0x00022803  CPU%(cpu)d  %(tsc)d (+%(reltsc)8d)  rtds:burn_budget   [ dom:vcpu = 0x%(1)08x, cur_budget = 0x%(3)08x%(2)08x, delta = %(4)d ]
+0x00022803  CPU%(cpu)d  %(tsc)d (+ )  rtds:burn_budget   [ dom:vcpu = 0x%(1)08x, cur_budget = 0x%(3)08x%(2)08x, delta = %(4)d miss= %(5)d ]
 0x00022804  CPU%(cpu)d  %(tsc)d (+ )  rtds:job_release   [ dom:vcpu = 0x%(1)08x, cur_deadline = 0x%(3)08x%(2)08x, cur_budget = 0x%(5)08x%(4)08x ]
 0x00022805  CPU%(cpu)d  %(tsc)d (+%(reltsc)8d)  rtds:sched_tasklet
 0x00022806  CPU%(cpu)d  %(tsc)d (+ )  rtds:dis_running     [ dom:vcpu = 0x%(1)08x, cur_deadline = 0x%(3)08x%(2)08x, cur_budget = 0x%(5)08x%(4)08x ]

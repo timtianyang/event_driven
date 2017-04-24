@@ -7596,12 +7596,13 @@ void sched_process(struct pcpu_info *p)
                     unsigned int vcpuid:16, domid:16;
                     unsigned int cur_bg_lo, cur_bg_hi;
                     int delta;
+                    int miss;
                 } *r = (typeof(r))ri->d;
                 uint64_t bg = (((uint64_t)r->cur_bg_hi) << 32) + r->cur_bg_lo;
 
                 printf(" %s rtds:burn_budget d%uv%u, budget = %"PRIu64", "
-                       "delta = %d\n", ri->dump_header, r->domid,
-                       r->vcpuid, bg, r->delta);
+                       "delta = %d miss = %d\n", ri->dump_header, r->domid,
+                       r->vcpuid, bg, r->delta, r->miss);
             }
             break;
         case TRC_SCHED_CLASS_EVT(RTDS, 4): /* JOB_RELEASE */
