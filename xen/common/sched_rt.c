@@ -2489,7 +2489,7 @@ rt_dom_cntl(
                      * spcial case for unchanged, only if it missed, release here
                      * for others, always release
                      */
-                    if ( svc->type != UNCHANGED || missed )
+                    //if ( svc->type != UNCHANGED || missed )
                     {
                         //printk("high criticality or no new guard release\n");
 
